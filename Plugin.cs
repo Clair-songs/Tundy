@@ -160,22 +160,43 @@ public sealed partial class Plugin : IDalamudPlugin
         else if (SoundyQHoldsSongSlot)
             Chat.PrintError("[Tundy] SoundyQ (in Soundy) is on and holds the music mod's song slot, so nearby players won't hear Tundy's songs. Turn SoundyQ off in /soundyq.");
 
-        // Get the download tools ready in the background so the first request is fast:
-        // yt-dlp, deno (yt-dlp needs it for YouTube), and a yt-dlp update at most once a day.
+        ImportNotes = importNotes;
+        if (Config.ShowWelcome)
+            Chat.Print("[Tundy] Tundy is ready. Type /tundy to set it up (song requests are paused until you do).");
+
+        StartToolDownloads(updateYtDlp: true);
+    }
+
+    /// <summary>ffmpeg is needed: songs are shared through the music mod (and the welcome guide is done).</summary>
+    public bool NeedsFfmpeg => !Config.ShowWelcome && Config.ShareViaLightless && Config.ShareTarget == 0;
+
+    /// <summary>What was copied from TellTunes and Soundy the first time (shown in the welcome guide).</summary>
+    public IReadOnlyList<string> ImportNotes { get; private set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Gets the download tools ready in the background so the first request is fast: yt-dlp, deno (yt-dlp needs it
+    /// for YouTube), ffmpeg when songs are shared through the music mod (not before the welcome guide is done, since
+    /// you may not share at all), and a yt-dlp update at most once a day. The "Getting ready" card shows progress.
+    /// </summary>
+    public void StartToolDownloads(bool updateYtDlp = false)
+    {
         _ = System.Threading.Tasks.Task.Run(async () =>
         {
+            YtDlp.LastToolError = null;
             try { await YtDlp.EnsureInstalledAsync(default); }
-            catch (Exception ex) { Log.Warning(ex, "Could not install yt-dlp yet"); return; }
+            catch (Exception ex) { Log.Warning(ex, "Could not install yt-dlp yet"); YtDlp.LastToolError = $"yt-dlp: {ex.Message}"; return; }
 
             try { await YtDlp.EnsureDenoAsync(default); }
-            catch (Exception ex) { Log.Warning(ex, "Could not install deno yet; YouTube downloads may fail more often"); }
+            catch (Exception ex) { Log.Warning(ex, "Could not install deno yet; YouTube downloads may fail more often"); YtDlp.LastToolError = $"deno: {ex.Message}"; }
 
             // Music mod songs need ffmpeg. Get Tundy's own copy now if there's none at all (not even Soundy's).
-            if (Ffmpeg.CurrentPath == null && Config.ShareViaLightless && Config.ShareTarget == 0)
+            if (NeedsFfmpeg && Ffmpeg.CurrentPath == null && !Ffmpeg.Downloading)
             {
                 try { await Ffmpeg.DownloadAsync(default); }
-                catch (Exception ex) { Log.Warning(ex, "Could not install ffmpeg yet"); }
+                catch (Exception ex) { Log.Warning(ex, "Could not install ffmpeg yet"); YtDlp.LastToolError = $"ffmpeg: {ex.Message}"; }
             }
+
+            if (!updateYtDlp) return;
 
             if (string.IsNullOrWhiteSpace(Config.YtDlpPath) && DateTime.UtcNow - Config.LastYtDlpUpdateUtc > TimeSpan.FromDays(1))
             {

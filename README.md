@@ -200,6 +200,15 @@ passes title changes on at most every 5 seconds. When the music stops (3 seconds
 Honorific title comes back; Honorific's settings are never changed and nothing is saved. Lightless pairs who also have
 Honorific see it a few seconds later. By default it only shows while the song is shared with them.
 
+## First start
+On a new setup, `/tundy` opens a short welcome guide (Settings → Look → Open the welcome guide again brings it
+back): 1) who can send you songs (approval first is preselected) and the request command, 2) who hears the music (just you,
+or your Lightless pairs too, with the same checks, "Set it up for me" and **Test now** as the Sharing tab), 3) a few extras
+(announce songs, replies, the Honorific title), 4) paste a first song and copy the line to give your friends. Song requests
+stay paused until you finish it, so nobody's link plays before you've picked who can send them. While yt-dlp, deno and
+ffmpeg download the first time, a **Getting ready** card shows each one (ffmpeg only when you share through the music mod).
+Existing setups don't see the guide and keep their settings.
+
 ## In-game control panel (`/tundy`)
 Pastel purple look, with a switch back to Dalamud's normal look in Settings → Look.
 - **Problems banner**: shows only when something's wrong, with a button that fixes it or opens where to fix it: TellTunes

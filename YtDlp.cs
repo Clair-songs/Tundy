@@ -63,6 +63,13 @@ public sealed class YtDlp
 
     public bool IsInstalled => File.Exists(ExePath);
 
+    /// <summary>True while yt-dlp or deno is being downloaded (for the "Getting ready" card).</summary>
+    public bool DownloadingYtDlp { get; private set; }
+    public bool DownloadingDeno { get; private set; }
+
+    /// <summary>Why the last download of a tool failed, or null.</summary>
+    public string? LastToolError { get; set; }
+
     /// <summary>
     /// Connect to YouTube over IPv4 only (yt-dlp's -4). Turned on for the rest of the session after YouTube answers
     /// a download with HTTP 403 or 503, which often happens over IPv6 (YouTube blocks some IPv6 address ranges).
@@ -88,6 +95,7 @@ public sealed class YtDlp
                 throw new FileNotFoundException($"yt-dlp not found at configured path: {customPath()}");
 
             Plugin.Log.Information("Downloading yt-dlp...");
+            DownloadingYtDlp = true;
             using var http = new HttpClient();
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Tundy-Dalamud-Plugin");
             var bytes = await http.GetByteArrayAsync(DownloadUrl, ct);
@@ -98,6 +106,7 @@ public sealed class YtDlp
         }
         finally
         {
+            DownloadingYtDlp = false;
             installLock.Release();
         }
     }
@@ -111,6 +120,7 @@ public sealed class YtDlp
         {
             if (DenoPath != null) return;
             Plugin.Log.Information("Downloading deno (JavaScript runtime yt-dlp needs for YouTube)...");
+            DownloadingDeno = true;
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Tundy-Dalamud-Plugin");
             var zip = await http.GetByteArrayAsync(DenoUrl, ct);
@@ -124,6 +134,7 @@ public sealed class YtDlp
         }
         finally
         {
+            DownloadingDeno = false;
             denoLock.Release();
         }
     }

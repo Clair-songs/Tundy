@@ -12,7 +12,7 @@ using Dalamud.Interface.Windowing;
 namespace Tundy;
 
 /// <summary>The full Tundy control panel.</summary>
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private readonly Plugin plugin;
     private readonly PlayerControls controls;
@@ -55,8 +55,15 @@ public sealed class MainWindow : Window
 
     public override void Draw()
     {
+        if (GuideActive)
+        {
+            DrawGuide();
+            return;
+        }
+
         DrawStatusBar();
         DrawProblems();
+        DrawGettingReady();
         ImGui.Spacing();
         DrawTabStrip();
         ImGui.Separator();
@@ -148,6 +155,53 @@ public sealed class MainWindow : Window
             list.Add(new Problem("The last song didn't play for others", sharer.LastCheck, "Open Sharing", () => page = Page.Sharing));
 
         return list;
+    }
+
+    /// <summary>
+    /// The download tools Tundy fetches on first use, while any of them is still missing: what's there, what's
+    /// downloading, and a retry when a download failed.
+    /// </summary>
+    private void DrawGettingReady()
+    {
+        var yt = plugin.YtDlp;
+        var ff = plugin.Ffmpeg;
+        var ytOk = yt.IsInstalled;
+        var denoOk = yt.DenoPath != null;
+        var ffNeeded = plugin.NeedsFfmpeg;
+        var ffOk = ff.CurrentPath != null;
+        if (ytOk && denoOk && (!ffNeeded || ffOk)) return;
+
+        var busy = yt.DownloadingYtDlp || yt.DownloadingDeno || ff.Downloading;
+        ImGui.Spacing();
+        Ui.BeginCard();
+        Ui.Label("GETTING READY");
+        Tool("yt-dlp", "downloads the songs", ytOk, yt.DownloadingYtDlp, "downloading...");
+        Tool("deno · about 40 MB", "gets past YouTube's download checks", denoOk, yt.DownloadingDeno, "downloading...");
+        if (ffNeeded) Tool("ffmpeg · about 120 MB", "converts songs for the music mod", ffOk, ff.Downloading, ff.Status.Length > 0 ? ff.Status : "downloading...");
+
+        if (!busy && yt.LastToolError != null)
+        {
+            ImGui.TextColored(Theme.Bad, $"Download failed: {yt.LastToolError}");
+            if (ImGui.Button("Try again")) plugin.StartToolDownloads();
+        }
+        else
+        {
+            ImGui.TextColored(Theme.Muted, "Songs can be requested now. The first one starts once these are done.");
+        }
+        Ui.EndCard();
+
+        static void Tool(string name, string what, bool ok, bool downloading, string progress)
+        {
+            ImGui.PushFont(UiBuilder.IconFont);
+            ImGui.TextColored(ok ? Theme.Good : downloading ? Theme.Info : Theme.Warn,
+                (ok ? FontAwesomeIcon.CheckCircle : downloading ? FontAwesomeIcon.Download : FontAwesomeIcon.Clock).ToIconString());
+            ImGui.PopFont();
+            ImGui.SameLine();
+            ImGui.TextUnformatted(name);
+            Ui.Tooltip(what);
+            ImGui.SameLine();
+            ImGui.TextColored(Theme.Muted, ok ? "ready" : downloading ? progress : "waiting");
+        }
     }
 
     private void DrawProblems()
@@ -350,7 +404,7 @@ public sealed class MainWindow : Window
         }
         if (queue.Length == 0)
         {
-            ImGui.TextDisabled("Nothing queued.");
+            ImGui.TextDisabled($"Nothing queued. Paste a link below, or have someone send \"/tell <you> {plugin.RequestCommands[0]} <link>\".");
         }
         else
         {
@@ -458,76 +512,10 @@ public sealed class MainWindow : Window
         Ui.Label("SHARING SETUP");
         ImGui.Spacing();
 
-        // 1. Plugins
-        var plugins = sharer.PenumbraAvailable && sharer.LightlessLoaded;
-        Step(plugins ? StepState.Done : StepState.Failed, "Penumbra and Lightless Sync",
-            plugins ? "Both are running."
-            : !sharer.PenumbraAvailable && !sharer.LightlessLoaded ? "Install both: Penumbra puts the song on your character, Lightless sends it to your pairs."
-            : !sharer.PenumbraAvailable ? "Penumbra isn't running. It puts the song on your character."
-            : "Lightless Sync isn't running. It sends the song to your pairs.");
-
-        // 2. The switch
-        var share = cfg.ShareViaLightless;
-        Step(share ? StepState.Done : StepState.Todo, "Sharing is on", share ? "Songs go out to nearby Lightless pairs." : "Off: songs play only for you.");
-        StepBody(() =>
-        {
-            if (ImGui.Checkbox("Share songs with nearby Lightless pairs", ref share)) { cfg.ShareViaLightless = share; changed = true; }
-            Ui.Help("Off = songs play only for you. Also: /tundy share");
-        });
-
-        // 3. What plays it
-        var owned = sharer.EmoteOwned();
-        if (sharer.UsesMusicMod)
-        {
-            var problems = plugin.Music.SetupProblems();
-            var ffmpeg = plugin.Ffmpeg.CurrentPath != null;
-            var detail = problems.Count > 0 ? problems[0]
-                : !ffmpeg ? (plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : "ffmpeg isn't installed yet: it converts songs for the music mod (about 120 MB, once).")
-                : owned == false ? $"Your character hasn't learned {sharer.Emote.Command}, the emote the music mod's dance is on."
-                : $"\"{cfg.QueueTargetMod}\" plays the songs through its dance on {sharer.Emote.Command}.";
-            var ok = problems.Count == 0 && ffmpeg && owned != false;
-            Step(ok ? StepState.Done : StepState.Failed, plugin.Music.IsRecommended ? "Mega Music Mod set up" : "Music mod set up", detail);
-            if (!ok)
-            {
-                StepBody(() =>
-                {
-                    if (problems.Count > 0 && plugin.Music.IsRecommended && plugin.Music.State().Installed && ImGui.Button("Set it up for me"))
-                        megaSetupResult = plugin.Music.SetUp();
-                    else if (problems.Count == 0 && !ffmpeg && !plugin.Ffmpeg.Downloading && ImGui.Button("Install ffmpeg"))
-                        _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { });
-                    else if ((problems.Count > 0 || owned == false) && ImGui.Button("Show the music mod settings"))
-                        openHowItPlays = true;
-                    if (megaSetupResult.Length > 0) ImGui.TextDisabled(megaSetupResult);
-                });
-            }
-        }
-        else
-        {
-            var ok = owned != false;
-            Step(ok ? StepState.Done : StepState.Failed, $"Emote: {sharer.Emote.Name} ({sharer.Emote.Command})",
-                ok ? "Its sound is replaced by the song while one is shared." : $"Your character hasn't learned {sharer.Emote.Command}. Pick another emote under \"How it plays\".");
-            if (!ok) StepBody(() => { if (ImGui.Button("Pick another emote")) openHowItPlays = true; });
-        }
-
-        // 4. Test
-        var canTest = share && sharer.PenumbraAvailable && plugin.Player.Current == null && !plugin.Player.WaitingForSync && !sharer.Testing;
-        Step(sharer.Testing ? StepState.Todo : !sharer.HasChecked ? StepState.Todo : sharer.LastCheckOk ? StepState.Done : StepState.Failed,
-            "Test it",
-            sharer.Testing ? "Testing..." : sharer.HasChecked ? sharer.LastCheck
-            : "Does the emote once and checks that the game loads Tundy's sound for your character, which is what Lightless sends. "
-              + "Each song is also checked when it starts.");
-        StepBody(() =>
-        {
-            if (!canTest) ImGui.BeginDisabled();
-            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Test now")) _ = sharer.TestAsync();
-            if (!canTest) ImGui.EndDisabled();
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(!share ? "Turn sharing on first."
-                    : plugin.Player.Current != null || plugin.Player.WaitingForSync ? "Works while no song is playing."
-                    : "Your character does the emote (quietly, no chat message). The first time, this also teaches Lightless the sound file, so the first song starts sooner.");
-        });
+        changed |= DrawSetupSteps(inGuide: false);
         Ui.EndCard();
 
+        var share = cfg.ShareViaLightless;
         if (!share) ImGui.BeginDisabled();
 
         if (openHowItPlays) ImGui.SetNextItemOpen(true);
@@ -620,6 +608,102 @@ public sealed class MainWindow : Window
         }
 
         if (changed) plugin.SaveConfig();
+    }
+
+    /// <summary>
+    /// The sharing setup checks: plugins, the sharing switch, the music mod or emote, and Test now. Used by the
+    /// Sharing tab and the welcome guide (which has its own "who hears it" choice instead of the switch, and no
+    /// links to the Sharing tab's sections). Saves any change itself.
+    /// </summary>
+    private bool DrawSetupSteps(bool inGuide)
+    {
+        var cfg = plugin.Config;
+        var sharer = plugin.Sharer;
+        var changed = false;
+
+        // 1. Plugins
+        var plugins = sharer.PenumbraAvailable && sharer.LightlessLoaded;
+        Step(plugins ? StepState.Done : StepState.Failed, "Penumbra and Lightless Sync",
+            plugins ? "Both are running."
+            : !sharer.PenumbraAvailable && !sharer.LightlessLoaded ? "Install both: Penumbra puts the song on your character, Lightless sends it to your pairs."
+            : !sharer.PenumbraAvailable ? "Penumbra isn't running. It puts the song on your character."
+            : "Lightless Sync isn't running. It sends the song to your pairs.");
+
+        // 2. The switch
+        var share = cfg.ShareViaLightless;
+        if (!inGuide)
+        {
+            Step(share ? StepState.Done : StepState.Todo, "Sharing is on", share ? "Songs go out to nearby Lightless pairs." : "Off: songs play only for you.");
+            StepBody(() =>
+            {
+                if (ImGui.Checkbox("Share songs with nearby Lightless pairs", ref share)) { cfg.ShareViaLightless = share; changed = true; }
+                Ui.Help("Off = songs play only for you. Also: /tundy share");
+            });
+        }
+
+        // 3. What plays it
+        var owned = sharer.EmoteOwned();
+        if (sharer.UsesMusicMod)
+        {
+            var problems = plugin.Music.SetupProblems();
+            var ffmpeg = plugin.Ffmpeg.CurrentPath != null;
+            var detail = problems.Count > 0 ? problems[0]
+                : !ffmpeg ? (plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : "ffmpeg isn't installed yet: it converts songs for the music mod (about 120 MB, once).")
+                : owned == false ? $"Your character hasn't learned {sharer.Emote.Command}, the emote the music mod's dance is on."
+                : $"\"{cfg.QueueTargetMod}\" plays the songs through its dance on {sharer.Emote.Command}.";
+            var ok = problems.Count == 0 && ffmpeg && owned != false;
+            Step(ok ? StepState.Done : StepState.Failed, plugin.Music.IsRecommended ? "Mega Music Mod set up" : "Music mod set up", detail);
+            if (!ok)
+            {
+                StepBody(() =>
+                {
+                    var music = plugin.Music;
+                    var other = !music.State().Installed && music.IsRecommended ? music.InstalledMega() : null;
+                    if (other != null && ImGui.Button($"Use \"{other}\""))
+                    {
+                        cfg.QueueTargetMod = other;
+                        music.Recheck();
+                        changed = true;
+                    }
+                    else if (problems.Count > 0 && music.IsRecommended && music.State().Installed && ImGui.Button("Set it up for me"))
+                        megaSetupResult = music.SetUp();
+                    else if (problems.Count == 0 && !ffmpeg && !plugin.Ffmpeg.Downloading && ImGui.Button("Install ffmpeg"))
+                        _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { });
+                    else if (!inGuide && (problems.Count > 0 || owned == false) && ImGui.Button("Show the music mod settings"))
+                        openHowItPlays = true;
+                    if (megaSetupResult.Length > 0) ImGui.TextDisabled(megaSetupResult);
+                });
+            }
+        }
+        else
+        {
+            var ok = owned != false;
+            Step(ok ? StepState.Done : StepState.Failed, $"Emote: {sharer.Emote.Name} ({sharer.Emote.Command})",
+                ok ? "Its sound is replaced by the song while one is shared."
+                   : $"Your character hasn't learned {sharer.Emote.Command}. Pick another emote {(inGuide ? "in the Sharing tab later" : "under \"How it plays\"")}.");
+            if (!ok && !inGuide) StepBody(() => { if (ImGui.Button("Pick another emote")) openHowItPlays = true; });
+        }
+
+        // 4. Test
+        var canTest = share && sharer.PenumbraAvailable && plugin.Player.Current == null && !plugin.Player.WaitingForSync && !sharer.Testing;
+        Step(sharer.Testing ? StepState.Todo : !sharer.HasChecked ? StepState.Todo : sharer.LastCheckOk ? StepState.Done : StepState.Failed,
+            "Test it",
+            sharer.Testing ? "Testing..." : sharer.HasChecked ? sharer.LastCheck
+            : "Does the emote once and checks that the game loads Tundy's sound for your character, which is what Lightless sends. "
+              + "Each song is also checked when it starts.");
+        StepBody(() =>
+        {
+            if (!canTest) ImGui.BeginDisabled();
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Test now")) _ = sharer.TestAsync();
+            if (!canTest) ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(!share ? "Turn sharing on first."
+                    : plugin.Player.Current != null || plugin.Player.WaitingForSync ? "Works while no song is playing."
+                    : "Your character does the emote (quietly, no chat message). The first time, this also teaches Lightless the sound file, so the first song starts sooner.");
+        });
+
+        if (changed) plugin.SaveConfig();
+        return false; // already saved
     }
 
     /// <summary>The music mod, its song slot and its emote. Returns true if a setting changed.</summary>
@@ -1277,6 +1361,8 @@ public sealed class MainWindow : Window
             var covers = cfg.ShowCoverArt;
             if (ImGui.Checkbox("Show song covers", ref covers)) { cfg.ShowCoverArt = covers; changed = true; }
             Ui.Help("The song's YouTube thumbnail, loaded from YouTube's image server (i.ytimg.com) for the song that's playing.");
+            if (ImGui.Button("Open the welcome guide again")) OpenGuide();
+            Ui.Tooltip("Four short steps: who can send songs, who hears them, a few extras, and a first song.");
         }
 
         if (Ui.Group("Requests", true))

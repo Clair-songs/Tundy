@@ -30,6 +30,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Pastel purple look for Tundy's windows. Off = Dalamud's normal look.</summary>
     public bool PastelTheme { get; set; } = true;
 
+    /// <summary>Show the welcome guide the next time the control panel opens (set for brand-new setups).</summary>
+    public bool ShowWelcome { get; set; }
+
     /// <summary>Show the song's cover (its YouTube thumbnail) in the player.</summary>
     public bool ShowCoverArt { get; set; } = true;
 
@@ -199,7 +202,8 @@ public class Configuration : IPluginConfiguration
     public List<string> ShuffleCommands { get; set; } = new() { "!shuffle" };
 
     /// <summary>Who can request songs (players in <see cref="QueuePlayerRules"/> get their own setting instead).</summary>
-    public AccessMode QueueAccessMode { get; set; } = AccessMode.EveryoneAutoApprove;
+    // New setups start with approval (existing settings files keep the value they saved).
+    public AccessMode QueueAccessMode { get; set; } = AccessMode.EveryonePreQueue;
 
     /// <summary>Players with their own request permission, overriding <see cref="QueueAccessMode"/>.</summary>
     public List<QueuePlayerRule> QueuePlayerRules { get; set; } = new();

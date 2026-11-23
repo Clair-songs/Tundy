@@ -43,6 +43,14 @@ internal static class SettingsImporter
             changed = true;
         }
 
+        // A brand-new Tundy setup: the welcome guide opens with /tundy, and requests wait until it's finished
+        // (they're turned on in its last step, or by hand), so nobody's song plays before you've chosen who can send them.
+        if (existing == null)
+        {
+            config.ShowWelcome = true;
+            config.Enabled = false;
+        }
+
         if (changed) pi.SavePluginConfig(config);
         return config;
     }
