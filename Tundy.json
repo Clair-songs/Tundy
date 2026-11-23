@@ -1,0 +1,8 @@
+{
+  "Author": "Tundy",
+  "Name": "Tundy",
+  "Punchline": "Play songs people send you by /tell: YouTube, Spotify and playlists.",
+  "Description": "When someone sends you a tell with \"!q <link>\", Tundy queues the song automatically. Works with YouTube videos and playlists, and Spotify tracks, playlists and albums (matched to YouTube). Has its own song queue like SoundyQ (approval queue, who can request, per-player permissions) and plays songs for nearby Lightless Sync pairs through the Mega Music Mod. Includes Soundy's import tools: add YouTube or local songs to any Penumbra mod with loudness and EQ presets, and replace game sounds. Optional: announce songs in chat and tell requesters their place in the queue. Downloads use yt-dlp, which Tundy fetches on first use. Free software under the GNU AGPL-3.0.",
+  "Tags": [ "music", "youtube", "spotify", "tell", "audio", "playlist" ],
+  "RepoUrl": "https://github.com/Clair-songs/Tundy"
+}
