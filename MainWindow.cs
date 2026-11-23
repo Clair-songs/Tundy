@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
+using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 
@@ -16,14 +17,11 @@ public sealed class MainWindow : Window
     private readonly Plugin plugin;
     private readonly PlayerControls controls;
     private readonly ImportTab importTab;
-    private bool selectImport;
     private string cleanResult = string.Empty;
 
     private string linkInput = string.Empty;
     private string linkError = string.Empty;
     private bool onlyIgnored;
-    private bool selectSettings;
-    private bool selectQueue;
     private string aliasInput = string.Empty;
     private string shuffleInput = string.Empty;
     private string ruleName = string.Empty;
@@ -43,52 +41,86 @@ public sealed class MainWindow : Window
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 
-    public void SelectSettingsTab() => selectSettings = true;
+    private enum Page { NowPlaying, Queue, People, Sharing, Import, Settings }
 
-    public void SelectImportTab() => selectImport = true;
+    private Page page = Page.NowPlaying;
+
+    public void SelectSettingsTab() => page = Page.Settings;
+
+    public void SelectImportTab() => page = Page.Import;
+
+    public override void PreDraw() => Theme.Push(plugin.Config.PastelTheme);
+
+    public override void PostDraw() => Theme.Pop();
 
     public override void Draw()
     {
         DrawStatusBar();
-        ImGui.PushTextWrapPos();
+        DrawConflicts();
+        ImGui.Spacing();
+        DrawTabStrip();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.BeginChild("page", Vector2.Zero, false);
+        switch (page)
+        {
+            case Page.NowPlaying: DrawPlayerTab(); break;
+            case Page.Queue: DrawQueueTab(); break;
+            case Page.People: DrawAccessTab(); break;
+            case Page.Sharing: DrawSharingTab(); break;
+            case Page.Import: importTab.Draw(); break;
+            case Page.Settings: DrawSettingsTab(); break;
+        }
+        ImGui.EndChild();
+    }
+
+    private void DrawConflicts()
+    {
+        if (!plugin.TellTunesLoaded && !plugin.SoundyQListening) return;
+        ImGui.Spacing();
+        Ui.BeginCard();
         if (plugin.TellTunesLoaded)
-            ImGui.TextColored(ImGuiColors.DalamudRed,
-                "TellTunes is also on, so Tundy ignores song requests. Turn TellTunes off in /xlplugins.");
+            ImGui.TextColored(Theme.Bad, "TellTunes is also on, so Tundy ignores song requests. Turn TellTunes off in /xlplugins.");
         if (plugin.SoundyQListening)
         {
-            ImGui.TextColored(ImGuiColors.DalamudRed,
+            ImGui.TextColored(Theme.Bad,
                 "SoundyQ (in Soundy) is also on and answers the same tells, so Tundy ignores song requests. "
                 + "Turn SoundyQ off in its window (Soundy's other tools can stay on).");
             if (ImGui.SmallButton("Open SoundyQ")) plugin.OpenSoundyQ();
         }
-        ImGui.PopTextWrapPos();
-        ImGui.Separator();
-
-        if (!ImGui.BeginTabBar("tabs")) return;
-
-        Tab("Player", DrawPlayerTab);
-        Tab("Sharing", DrawSharingTab);
-        var waiting = plugin.Pending.Count;
-        Tab(waiting > 0 ? $"Queue ({plugin.Player.PendingCount} + {waiting} to approve)###queue" : $"Queue ({plugin.Player.PendingCount})###queue",
-            DrawQueueTab, selectQueue);
-        selectQueue = false;
-        Tab("History", DrawHistoryTab);
-        Tab("Requests", DrawRequestsTab);
-        Tab("Access", DrawAccessTab);
-        Tab("Import", importTab.Draw, selectImport);
-        selectImport = false;
-        Tab("Settings", DrawSettingsTab, selectSettings);
-        selectSettings = false;
-
-        ImGui.EndTabBar();
+        Ui.EndCard();
     }
 
-    private static void Tab(string label, Action draw, bool select = false)
+    private void DrawTabStrip()
     {
-        if (!ImGui.BeginTabItem(label, select ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None)) return;
-        ImGui.Spacing();
-        draw();
-        ImGui.EndTabItem();
+        var waiting = plugin.Pending.Count;
+        var queued = plugin.Player.PendingCount;
+        (Page Page, FontAwesomeIcon Icon, string Label)[] tabs =
+        {
+            (Page.NowPlaying, FontAwesomeIcon.Music, waiting > 0 ? $"Now playing ({waiting})" : "Now playing"),
+            (Page.Queue, FontAwesomeIcon.ListOl, queued > 0 ? $"Queue ({queued})" : "Queue"),
+            (Page.People, FontAwesomeIcon.Users, "People"),
+            (Page.Sharing, FontAwesomeIcon.ShareAlt, "Sharing"),
+            (Page.Import, FontAwesomeIcon.FileImport, "Import"),
+            (Page.Settings, FontAwesomeIcon.Cog, "Settings"),
+        };
+
+        for (var i = 0; i < tabs.Length; i++)
+        {
+            var (p, icon, label) = tabs[i];
+            if (i > 0) Ui.SameLineIfFits(ImGuiComponents.GetIconButtonWithTextWidth(icon, label));
+            var selected = page == p;
+            var on = Theme.Active ? Theme.LavenderDeep : Theme.Info with { W = 0.5f };
+            var off = Theme.Active ? Theme.PlumCard : new Vector4(1, 1, 1, 0.06f);
+            ImGui.PushStyleColor(ImGuiCol.Button, selected ? on : off);
+            ImGui.PushStyleColor(ImGuiCol.Text, selected || !Theme.Active ? Theme.TextLight : Theme.TextMuted);
+            ImGui.PushID($"tab{i}");
+            if (ImGuiComponents.IconButtonWithText(icon, label)) page = p;
+            ImGui.PopID();
+            ImGui.PopStyleColor(2);
+            if (p == Page.NowPlaying && waiting > 0) Ui.Tooltip($"{waiting} request(s) waiting for your approval");
+        }
     }
 
     // ------------------------------------------------------------------ top bar
@@ -97,88 +129,92 @@ public sealed class MainWindow : Window
     {
         var cfg = plugin.Config;
 
-        var color = cfg.Enabled ? ImGuiColors.HealerGreen : ImGuiColors.DalamudGrey3;
-        ImGui.PushStyleColor(ImGuiCol.Button, color with { W = 0.35f });
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, color with { W = 0.55f });
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive, color with { W = 0.75f });
-        if (ImGui.Button(cfg.Enabled ? "Accepting !q requests" : "Requests paused"))
+        ImGui.AlignTextToFramePadding();
+        ImGui.PushFont(UiBuilder.IconFont);
+        ImGui.TextColored(Theme.Accent, FontAwesomeIcon.Music.ToIconString());
+        ImGui.PopFont();
+        ImGui.SameLine();
+        ImGui.TextColored(Theme.Heading, "Tundy");
+        ImGui.SameLine();
+
+        var requests = cfg.Enabled ? "Accepting requests" : "Requests paused";
+        if (Ui.Pill(requests, cfg.Enabled ? Theme.Good : Theme.Muted, cfg.Enabled
+                ? "People can send you songs with /tell. Click to pause."
+                : "Tell requests are ignored. Click to start accepting them again."))
         {
             cfg.Enabled = !cfg.Enabled;
             plugin.SaveConfig();
         }
-        ImGui.PopStyleColor(3);
-        Ui.Tooltip(cfg.Enabled
-            ? "People can send you songs with /tell. Click to pause."
-            : "Tell requests are ignored. Click to start accepting them again.");
 
-        ImGui.SameLine();
-        ImGui.TextDisabled(cfg.QueueAccessMode switch
+        var who = cfg.QueueAccessMode switch
         {
-            AccessMode.EveryonePreQueue => "· Anyone, with your approval",
-            AccessMode.ListedOnly => "· Listed players only",
-            _ => "· Anyone can request",
-        });
-        Ui.Tooltip("Change it in the Access tab.");
-        ImGui.SameLine();
+            AccessMode.EveryonePreQueue => "Anyone, with approval",
+            AccessMode.ListedOnly => "Listed players only",
+            _ => "Anyone can request",
+        };
+        Ui.SameLineIfFits(ImGui.CalcTextSize(who).X + 20 * ImGuiHelpers.GlobalScale);
+        if (Ui.Pill(who, Theme.Info, "Who can send you songs. Click to change it in People."))
+            page = Page.People;
+
+        string sharing;
+        Vector4 shareColor;
         if (plugin.Sharer.CanShare && plugin.Sharer.UsesMusicMod)
         {
             var ready = plugin.Music.SetupProblems().Count == 0;
-            ImGui.TextColored(ready ? ImGuiColors.ParsedBlue : ImGuiColors.DalamudOrange, ready ? "· Via the music mod" : "· Music mod needs setup");
-            Ui.Tooltip("Songs play through the music mod's DJ dance for you and your Lightless pairs nearby. See the Sharing tab.");
+            sharing = ready ? "Via the music mod" : "Music mod needs setup";
+            shareColor = ready ? Theme.Accent : Theme.Warn;
         }
         else if (plugin.Sharer.CanShare)
         {
-            ImGui.TextColored(ImGuiColors.ParsedBlue, "· Shared via Lightless");
-            Ui.Tooltip("Songs play for your Lightless pairs nearby. Set it up in the Sharing tab.");
+            sharing = "Shared via Lightless";
+            shareColor = Theme.Accent;
         }
         else
         {
-            ImGui.TextDisabled("· Just for you");
+            sharing = "Just for you";
+            shareColor = Theme.Muted;
         }
+        Ui.SameLineIfFits(ImGui.CalcTextSize(sharing).X + 20 * ImGuiHelpers.GlobalScale);
+        if (Ui.Pill(sharing, shareColor, "How other players hear the songs. Click to open Sharing."))
+            page = Page.Sharing;
 
         var waiting = plugin.Pending.Count;
         if (waiting > 0)
         {
-            ImGui.SameLine();
-            ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudOrange);
-            if (ImGui.SmallButton($"{waiting} to approve")) selectQueue = true;
-            ImGui.PopStyleColor();
-            Ui.Tooltip("Requests waiting for your approval. Click to see them in the Queue tab.");
+            var label = $"{waiting} to approve";
+            Ui.SameLineIfFits(ImGui.CalcTextSize(label).X + 20 * ImGuiHelpers.GlobalScale);
+            if (Ui.Pill(label, Theme.Warn, "Requests waiting for your approval. Click to see them."))
+                page = Page.NowPlaying;
         }
 
         // Right-aligned "Now playing" window toggle
         var mini = cfg.ShowMiniPlayer;
-        const string label = "Now playing window";
-        var w = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize(label).X;
+        var w = ImGui.GetFrameHeight();
         ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - w);
-        if (ImGui.Checkbox(label, ref mini))
-            plugin.SetMiniPlayer(mini);
-        Ui.Tooltip("Small window with the song's name and time. Also: /tundy mini");
+        if (Ui.IconButton("mini", mini ? FontAwesomeIcon.WindowClose : FontAwesomeIcon.WindowRestore,
+                mini ? "Hide the small \"Now playing\" window (/tundy mini)" : "Show the small \"Now playing\" window (/tundy mini)"))
+            plugin.SetMiniPlayer(!mini);
     }
 
-    // ------------------------------------------------------------------ Player
+    // ------------------------------------------------------------------ Now playing
 
     private void DrawPlayerTab()
     {
         var player = plugin.Player;
-        var width = ImGui.GetContentRegionAvail().X;
 
-        ImGui.TextDisabled("NOW PLAYING");
+        // Now playing card
+        Ui.BeginCard();
+        Ui.Label("NOW PLAYING");
         if (player.Current is { } t)
         {
-            ImGui.PushTextWrapPos();
             ImGui.TextUnformatted(t.Title);
-            ImGui.PopTextWrapPos();
             ImGui.TextDisabled("Requested by");
             ImGui.SameLine();
             Ui.SenderCell(plugin, t.Request.Sender, "np");
             if (player.CurrentIsShared)
-            {
-                ImGui.SameLine();
-                ImGui.TextColored(ImGuiColors.ParsedBlue, plugin.Sharer.UsesMusicMod
-                    ? $"(playing through the music mod for Lightless pairs, {plugin.Sharer.Emote.Command})"
-                    : $"(playing for Lightless pairs via {plugin.Sharer.Emote.Command})");
-            }
+                ImGui.TextColored(Theme.Accent, plugin.Sharer.UsesMusicMod
+                    ? $"Playing through the music mod for Lightless pairs ({plugin.Sharer.Emote.Command})"
+                    : $"Playing for Lightless pairs via {plugin.Sharer.Emote.Command}");
         }
         else if (player.WaitingForSync)
         {
@@ -192,34 +228,51 @@ public sealed class MainWindow : Window
         }
 
         ImGui.Spacing();
+        var width = ImGui.GetContentRegionAvail().X - 10 * ImGuiHelpers.GlobalScale;
         controls.DrawSeekBar(width);
         controls.DrawButtons();
         ImGui.SameLine();
         ImGui.Dummy(new Vector2(12, 0));
         ImGui.SameLine();
-        controls.DrawVolume(Math.Min(220 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight()));
+        controls.DrawVolume(Math.Min(220 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight() * 2));
+        Ui.EndCard();
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        // Approvals card (only when someone waits)
+        DrawPendingSection();
 
-        var (next, ready) = player.UpNext;
-        ImGui.TextDisabled("UP NEXT");
-        if (next != null)
+        // Up next card
+        Ui.BeginCard();
+        Ui.Label("UP NEXT");
+        var queue = player.FullQueue();
+        var (_, ready) = player.UpNext;
+        if (queue.Length == 0)
         {
-            ImGui.TextUnformatted(next.Display);
-            ImGui.TextDisabled($"from {next.Sender} · {(ready ? "ready" : "downloading...")}");
+            ImGui.TextDisabled("Nothing queued.");
         }
         else
         {
-            var q = player.QueueSnapshot();
-            ImGui.TextUnformatted(q.Length > 0 ? q[0].Display : "Nothing queued");
+            for (var i = 0; i < Math.Min(queue.Length, 3); i++)
+            {
+                var (r, isNext) = queue[i];
+                ImGui.PushID($"next{r.Id}");
+                ImGui.TextColored(isNext ? Theme.Accent : Theme.Muted, $"{i + 1}.");
+                ImGui.SameLine();
+                ImGui.TextUnformatted(r.Display);
+                ImGui.SameLine();
+                ImGui.TextDisabled(isNext ? $"· {r.Sender} · {(ready ? "ready" : "getting it ready...")}" : $"· {r.Sender}");
+                ImGui.PopID();
+            }
+            if (queue.Length > 3)
+            {
+                if (ImGui.SmallButton($"See all {queue.Length} in the queue")) page = Page.Queue;
+            }
         }
+        Ui.EndCard();
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        // Add a song card
+        Ui.BeginCard();
         DrawAddLink("player");
+        Ui.EndCard();
     }
 
     private string lastSubmitted = string.Empty;
@@ -260,7 +313,7 @@ public sealed class MainWindow : Window
         }
 
         if (linkError.Length > 0)
-            ImGui.TextColored(ImGuiColors.DalamudRed, linkError);
+            ImGui.TextColored(Theme.Bad, linkError);
     }
 
     // ------------------------------------------------------------------ Sharing
@@ -278,10 +331,24 @@ public sealed class MainWindow : Window
         ImGui.PopTextWrapPos();
         ImGui.Spacing();
 
-        // Requirements
-        Check("Penumbra", sharer.PenumbraAvailable, "Needed to put the song on your character.");
-        Check("Lightless Sync", sharer.LightlessLoaded, "Needed to send it to other players.");
-        ImGui.Spacing();
+        // Setup checklist
+        Ui.BeginCard();
+        Ui.Label("SETUP CHECKLIST");
+        Check("Penumbra is installed", sharer.PenumbraAvailable, "Needed to put the song on your character.");
+        Check("Lightless Sync is installed", sharer.LightlessLoaded, "Needed to send it to other players.");
+        Check("Sharing is on", cfg.ShareViaLightless, "The switch below. Off = songs play only for you.");
+        if (sharer.UsesMusicMod)
+        {
+            var problems = plugin.Music.SetupProblems();
+            Check(problems.Count == 0 ? "The music mod is set up" : $"The music mod: {problems[0]}", problems.Count == 0,
+                "See \"Music mod\" below. The button there can set it up for you.");
+            Check(plugin.Ffmpeg.CurrentPath != null ? "ffmpeg is installed" : "ffmpeg isn't installed yet", plugin.Ffmpeg.CurrentPath != null,
+                "Converts songs to the music mod's format. It downloads with the first song, or in Settings → Download tools.");
+        }
+        var tested = sharer.LastCheck != "No song shared yet.";
+        Check(!tested ? "Not tested yet: it's checked when the next song starts" : sharer.LastCheckOk ? "The last song played for your character" : "The last song didn't play for your character",
+            tested && sharer.LastCheckOk, tested ? sharer.LastCheck : "Tundy checks each song as it starts.", warnOnly: !tested);
+        Ui.EndCard();
 
         var share = cfg.ShareViaLightless;
         if (ImGui.Checkbox("Share songs with nearby Lightless pairs", ref share)) { cfg.ShareViaLightless = share; changed = true; }
@@ -344,7 +411,7 @@ public sealed class MainWindow : Window
             ? "Music mod songs are stereo Vorbis: about 1.2 MB per minute of music, or about 0.7 MB smaller. Applies to songs downloaded after you change it."
             : "Normal: about 1.4 MB per minute of music. Smaller: about 0.7 MB. Applies to songs downloaded after you change it.");
         if (sharer.UsesMusicMod && plugin.Ffmpeg.CurrentPath == null)
-            ImGui.TextColored(ImGuiColors.DalamudOrange, plugin.Ffmpeg.Downloading
+            ImGui.TextColored(Theme.Warn, plugin.Ffmpeg.Downloading
                 ? plugin.Ffmpeg.Status
                 : "ffmpeg isn't installed yet: the music mod needs it. It downloads with the first song, or in Settings → Download tools.");
 
@@ -358,7 +425,7 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
         ImGui.TextDisabled($"Status: {sharer.Status}");
         ImGui.PushTextWrapPos();
-        ImGui.TextColored(sharer.LastCheckOk ? ImGuiColors.HealerGreen : ImGuiColors.DalamudOrange, $"Last check: {sharer.LastCheck}");
+        ImGui.TextColored(sharer.LastCheckOk ? Theme.Good : Theme.Warn, $"Last check: {sharer.LastCheck}");
         ImGui.PopTextWrapPos();
 
         Ui.Section("Good to know");
@@ -388,9 +455,9 @@ public sealed class MainWindow : Window
         ImGui.PushTextWrapPos();
         var problems = music.SetupProblems();
         if (problems.Count == 0)
-            ImGui.TextColored(ImGuiColors.HealerGreen, $"\"{cfg.QueueTargetMod}\" is on. Songs play through its DJ dance on {MegaMusicMod.SafeEmote(cfg.QueueEmoteCommand)}.");
+            ImGui.TextColored(Theme.Good, $"\"{cfg.QueueTargetMod}\" is on. Songs play through its DJ dance on {MegaMusicMod.SafeEmote(cfg.QueueEmoteCommand)}.");
         else
-            foreach (var p in problems) ImGui.TextColored(ImGuiColors.DalamudOrange, p);
+            foreach (var p in problems) ImGui.TextColored(Theme.Warn, p);
         ImGui.PopTextWrapPos();
 
         if (music.IsRecommended && music.State().Installed)
@@ -477,7 +544,7 @@ public sealed class MainWindow : Window
         Ui.Help("The emote the music mod's dance is on. For the Mega Music Mod's DJ dance it's /cheerjumpred. "
                 + "Done once when each song starts, without a chat message.");
         if (MegaMusicMod.SafeEmote(emote) != emote.Trim().ToLowerInvariant())
-            ImGui.TextColored(ImGuiColors.DalamudOrange, $"That isn't a plain emote command; {MegaMusicMod.RecommendedEmote} is used instead.");
+            ImGui.TextColored(Theme.Warn, $"That isn't a plain emote command; {MegaMusicMod.RecommendedEmote} is used instead.");
 
         return changed;
     }
@@ -513,9 +580,15 @@ public sealed class MainWindow : Window
         return changed;
     }
 
-    private static void Check(string name, bool ok, string why)
+    private static void Check(string text, bool ok, string why, bool warnOnly = false)
     {
-        ImGui.TextColored(ok ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed, ok ? $"{name}: found" : $"{name}: not found");
+        var color = ok ? Theme.Good : warnOnly ? Theme.Muted : Theme.Bad;
+        ImGui.PushFont(UiBuilder.IconFont);
+        ImGui.TextColored(color, (ok ? FontAwesomeIcon.CheckCircle : warnOnly ? FontAwesomeIcon.Clock : FontAwesomeIcon.TimesCircle).ToIconString());
+        ImGui.PopFont();
+        Ui.Tooltip(why);
+        ImGui.SameLine();
+        ImGui.TextUnformatted(text);
         Ui.Tooltip(why);
     }
 
@@ -523,8 +596,6 @@ public sealed class MainWindow : Window
 
     private void DrawQueueTab()
     {
-        DrawPendingSection();
-
         var player = plugin.Player;
         var queue = player.FullQueue(); // play order, the song being prepared to play next first
         var (_, ready) = player.UpNext;
@@ -539,13 +610,14 @@ public sealed class MainWindow : Window
         ImGui.SameLine();
         ImGui.TextDisabled($"{player.PendingCount} waiting · limit {plugin.Config.MaxQueueLength} for tell requests");
 
-        var footer = ImGui.GetFrameHeightWithSpacing() * 3.5f;
         var rowH = ImGui.GetFrameHeight();
         var actionsW = (rowH + ImGui.GetStyle().ItemSpacing.X) * 4;
+        var rows = Math.Clamp(queue.Length + (downloading != null ? 1 : 0), 3, 12) + 1;
+        var tableH = rows * (rowH + ImGui.GetStyle().CellPadding.Y * 2) + 4;
 
         if (ImGui.BeginTable("queue", 4,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp,
-                new Vector2(0, ImGui.GetContentRegionAvail().Y - footer)))
+                new Vector2(0, tableH)))
         {
             ImGui.TableSetupScrollFreeze(0, 1);
             ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 26 * ImGuiHelpers.GlobalScale);
@@ -563,7 +635,7 @@ public sealed class MainWindow : Window
                 ImGui.PushID(r.Id.ToString());
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                if (isNext) ImGui.TextColored(ImGuiColors.ParsedBlue, (i + 1).ToString());
+                if (isNext) ImGui.TextColored(Theme.Info, (i + 1).ToString());
                 else ImGui.TextDisabled((i + 1).ToString());
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(r.Display);
@@ -601,6 +673,11 @@ public sealed class MainWindow : Window
 
         ImGui.Spacing();
         DrawAddLink("queue");
+
+        if (Ui.Group($"History ({player.HistorySnapshot().Length} played)###history"))
+            DrawHistoryTab();
+        if (Ui.Group("Requests log###requestslog"))
+            DrawRequestsTab();
     }
 
     private void SpecialRow(string tag, SongRequest r, string state, bool allowRemove)
@@ -608,7 +685,7 @@ public sealed class MainWindow : Window
         ImGui.PushID("special" + r.Id);
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
-        ImGui.TextColored(ImGuiColors.ParsedBlue, tag);
+        ImGui.TextColored(Theme.Info, tag);
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(r.Display);
         ImGui.SameLine();
@@ -627,7 +704,9 @@ public sealed class MainWindow : Window
         var pending = plugin.Pending.Snapshot();
         if (pending.Length == 0) return;
 
-        ImGui.TextColored(ImGuiColors.DalamudOrange, $"WAITING FOR YOUR APPROVAL ({pending.Length})");
+        Ui.BeginCard();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextColored(Theme.Warn, $"WAITING FOR YOUR APPROVAL ({pending.Length})");
         ImGui.SameLine();
         if (ImGui.SmallButton("Approve all")) plugin.ApproveAll();
 
@@ -671,9 +750,7 @@ public sealed class MainWindow : Window
             }
             ImGui.EndTable();
         }
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        Ui.EndCard();
     }
 
     // ------------------------------------------------------------------ History
@@ -693,7 +770,7 @@ public sealed class MainWindow : Window
 
         if (!ImGui.BeginTable("history", 4,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp,
-                new Vector2(0, ImGui.GetContentRegionAvail().Y)))
+                new Vector2(0, 240 * ImGuiHelpers.GlobalScale)))
             return;
 
         ImGui.TableSetupScrollFreeze(0, 1);
@@ -754,7 +831,7 @@ public sealed class MainWindow : Window
 
         if (!ImGui.BeginTable("log", 4,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable,
-                new Vector2(0, ImGui.GetContentRegionAvail().Y)))
+                new Vector2(0, 240 * ImGuiHelpers.GlobalScale)))
             return;
 
         ImGui.TableSetupScrollFreeze(0, 1);
@@ -778,7 +855,7 @@ public sealed class MainWindow : Window
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(e.Link + "\nClick to copy");
             if (ImGui.IsItemClicked()) ImGui.SetClipboardText(e.Link);
             ImGui.TableNextColumn();
-            ImGui.TextColored(e.Accepted ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed, e.Outcome);
+            ImGui.TextColored(e.Accepted ? Theme.Good : Theme.Bad, e.Outcome);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(e.Outcome);
             ImGui.PopID();
         }
@@ -800,7 +877,6 @@ public sealed class MainWindow : Window
     {
         var cfg = plugin.Config;
         var changed = false;
-        ImGui.BeginChild("access", Vector2.Zero, false);
 
         // Request commands
         Ui.Section("Request commands");
@@ -861,7 +937,7 @@ public sealed class MainWindow : Window
             ImGui.AlignTextToFramePadding();
             var cmdText = cfg.ShuffleCommands[i];
             if (cfg.QueueAliases.Contains(cmdText, StringComparer.OrdinalIgnoreCase))
-                ImGui.TextColored(ImGuiColors.DalamudOrange, $"{cmdText} (also a request command, so it doesn't shuffle)");
+                ImGui.TextColored(Theme.Warn, $"{cmdText} (also a request command, so it doesn't shuffle)");
             else
                 ImGui.TextUnformatted(cmdText);
             ImGui.PopID();
@@ -969,7 +1045,6 @@ public sealed class MainWindow : Window
             ImGui.EndTable();
         }
 
-        ImGui.EndChild();
         if (changed) plugin.SaveConfig();
     }
 
@@ -980,12 +1055,18 @@ public sealed class MainWindow : Window
         var cfg = plugin.Config;
         var changed = false;
 
-        ImGui.BeginChild("settings", Vector2.Zero, false);
+        if (Ui.Group("Look"))
+        {
+            var pastel = cfg.PastelTheme;
+            if (ImGui.Checkbox("Pastel purple theme", ref pastel)) { cfg.PastelTheme = pastel; changed = true; }
+            Ui.Help("Off = Dalamud's normal look. Only Tundy's windows change.");
+        }
 
-        Ui.Section("Requests");
+        if (Ui.Group("Requests", true))
+        {
         var enabled = cfg.Enabled;
         if (ImGui.Checkbox($"Accept song request tells ({string.Join(", ", plugin.RequestCommands)})", ref enabled)) { cfg.Enabled = enabled; changed = true; }
-        Ui.Help("Change the commands and who can request in the Access tab.");
+        Ui.Help("Change the commands and who can request in the People tab.");
 
         var spotify = cfg.AllowSpotify;
         if (ImGui.Checkbox("Accept Spotify track links", ref spotify)) { cfg.AllowSpotify = spotify; changed = true; }
@@ -1011,7 +1092,10 @@ public sealed class MainWindow : Window
         Ui.Help("How long one person has to wait between playlist requests (also with shuffle commands), on top of the cooldown above. "
                 + "With replies on, they're told how long is left. Playlists you add yourself or approve don't count.");
 
-        Ui.Section("Announce songs in chat");
+        }
+
+        if (Ui.Group("Announce songs in chat"))
+        {
         var announce = cfg.AnnounceSongs;
         if (ImGui.Checkbox("Say the song name and who requested it when a song starts", ref announce)) { cfg.AnnounceSongs = announce; changed = true; }
         Ui.Help("Posts one message from your character each time a song starts, in the channel below. "
@@ -1048,7 +1132,10 @@ public sealed class MainWindow : Window
         ImGui.TextDisabled(plugin.Announcer.LastResult);
         if (!announce) ImGui.EndDisabled();
 
-        Ui.Section("Skipping with !skip");
+        }
+
+        if (Ui.Group("Skipping with !skip"))
+        {
         string[] skipModes = { "Nobody (!skip is off)", "Only the person who requested the song", "Anyone who's allowed to request songs" };
         var skipMode = Math.Clamp(cfg.SkipPermission, 0, 2);
         ImGui.SetNextItemWidth(300 * ImGuiHelpers.GlobalScale);
@@ -1057,7 +1144,10 @@ public sealed class MainWindow : Window
                 + "Blocked people can never skip, and one person can skip at most once every 10 seconds. "
                 + "With \"Tell people where their song is in the queue\" on, they also get a short reply.");
 
-        Ui.Section("Reply to requesters");
+        }
+
+        if (Ui.Group("Reply to requesters"))
+        {
         var reply = cfg.ReplyQueuePosition;
         if (ImGui.Checkbox("Tell people where their song is in the queue", ref reply)) { cfg.ReplyQueuePosition = reply; changed = true; }
         Ui.Help("After a request is accepted, sends that person a tell like: \"Your song is in the queue. 3 songs play before it.\" "
@@ -1067,7 +1157,10 @@ public sealed class MainWindow : Window
         if (reply) ImGui.TextDisabled(plugin.Replier.LastResult);
         ImGui.PopTextWrapPos();
 
-        Ui.Section("Failed downloads");
+        }
+
+        if (Ui.Group("Failed downloads"))
+        {
         var retry = cfg.AutoRetry;
         if (ImGui.Checkbox("Retry automatically when a song's download fails", ref retry)) { cfg.AutoRetry = retry; changed = true; }
         Ui.Help("For temporary problems (network, YouTube slowing downloads down, bot checks). Songs that can't ever play "
@@ -1079,7 +1172,10 @@ public sealed class MainWindow : Window
         Ui.Help("Waits a few seconds longer before each try. Before the last try Tundy also updates yt-dlp, since YouTube changes often break older versions.");
         if (!retry) ImGui.EndDisabled();
 
-        Ui.Section("Playlists");
+        }
+
+        if (Ui.Group("Playlists"))
+        {
         var allowPl = cfg.AllowPlaylists;
         if (ImGui.Checkbox("Accept playlists (YouTube playlists, Spotify playlists and albums)", ref allowPl)) { cfg.AllowPlaylists = allowPl; changed = true; }
         Ui.Help("Send them like a song: !q <playlist link>. Live streams and songs longer than the max length are left out. "
@@ -1094,7 +1190,10 @@ public sealed class MainWindow : Window
         Ui.Help("So one tell can't fill the whole queue.");
         if (!allowPl) ImGui.EndDisabled();
 
-        Ui.Section("Playback");
+        }
+
+        if (Ui.Group("Playback"))
+        {
         var echo = cfg.EchoToChat;
         if (ImGui.Checkbox("Show \"Now playing / Queued\" messages in chat", ref echo)) { cfg.EchoToChat = echo; changed = true; }
 
@@ -1118,25 +1217,31 @@ public sealed class MainWindow : Window
         Ui.Help("Downloads that aren't kept above (and shared-song files) are removed once they've played.");
 
 
-        Ui.Section("Now playing window");
+        }
+
+        if (Ui.Group("Now playing window"))
+        {
         var showMini = cfg.ShowMiniPlayer;
         if (ImGui.Checkbox("Show the \"Now playing\" window (song name and time)", ref showMini)) plugin.SetMiniPlayer(showMini);
         var lockMini = cfg.LockMiniPlayer;
         if (ImGui.Checkbox("Lock its position", ref lockMini)) { cfg.LockMiniPlayer = lockMini; changed = true; }
 
-        Ui.Section("Download tools");
+        }
+
+        if (Ui.Group("Download tools"))
+        {
         if (plugin.YtDlp.IsInstalled)
-            ImGui.TextColored(ImGuiColors.HealerGreen, "Installed");
+            ImGui.TextColored(Theme.Good, "Installed");
         else
-            ImGui.TextColored(ImGuiColors.DalamudYellow, "Not installed yet (downloads automatically)");
+            ImGui.TextColored(Theme.Warn, "Not installed yet (downloads automatically)");
         ImGui.TextDisabled(plugin.YtDlp.ExePath);
         ImGui.TextDisabled(cfg.LastYtDlpUpdateUtc == DateTime.MinValue
             ? "Updates itself once a day."
             : $"Updates itself once a day. Last update: {Ui.Ago(cfg.LastYtDlpUpdateUtc.ToLocalTime())}.");
         if (plugin.YtDlp.DenoPath is { } deno)
-            ImGui.TextColored(ImGuiColors.HealerGreen, $"YouTube helper (deno): found ({deno})");
+            ImGui.TextColored(Theme.Good, $"YouTube helper (deno): found ({deno})");
         else
-            ImGui.TextColored(ImGuiColors.DalamudYellow, "YouTube helper (deno): not found yet (downloads automatically)");
+            ImGui.TextColored(Theme.Warn, "YouTube helper (deno): not found yet (downloads automatically)");
         Ui.Help("yt-dlp needs deno to get past YouTube's download checks. Without it, downloads fail more often.");
 
         var path = cfg.YtDlpPath;
@@ -1162,13 +1267,13 @@ public sealed class MainWindow : Window
         ImGui.Spacing();
         var ff = plugin.Ffmpeg;
         if (ff.Downloading)
-            ImGui.TextColored(ImGuiColors.ParsedBlue, ff.Status);
+            ImGui.TextColored(Theme.Info, ff.Status);
         else if (ff.CurrentPath == null)
-            ImGui.TextColored(ImGuiColors.DalamudYellow, "ffmpeg: not installed yet (downloads with the first music mod song or import)");
+            ImGui.TextColored(Theme.Warn, "ffmpeg: not installed yet (downloads with the first music mod song or import)");
         else if (ff.UsingSoundysCopy)
-            ImGui.TextColored(ImGuiColors.HealerGreen, $"ffmpeg: using Soundy's copy ({ff.CurrentPath})");
+            ImGui.TextColored(Theme.Good, $"ffmpeg: using Soundy's copy ({ff.CurrentPath})");
         else
-            ImGui.TextColored(ImGuiColors.HealerGreen, $"ffmpeg: installed ({ff.CurrentPath})");
+            ImGui.TextColored(Theme.Good, $"ffmpeg: installed ({ff.CurrentPath})");
         Ui.Help("ffmpeg converts songs to the music mod's format and applies loudness/EQ for imports. "
                 + "Tundy's own copy comes from the official Windows builds at gyan.dev (about 120 MB) and is checked against its published checksum.");
         if (ff.Downloading) ImGui.BeginDisabled();
@@ -1182,7 +1287,10 @@ public sealed class MainWindow : Window
             ImGui.TextDisabled(ff.Status);
         }
 
-        Ui.Section("Clean up");
+        }
+
+        if (Ui.Group("Clean up"))
+        {
         if (ImGui.Button("Clear temporary files"))
             cleanResult = Maintenance.Describe(Maintenance.ClearTempFiles());
         Ui.Tooltip("Leftover conversions and import downloads in the Windows temp folder.");
@@ -1216,10 +1324,13 @@ public sealed class MainWindow : Window
             ImGui.PopTextWrapPos();
         }
 
-        Ui.Section("Chat commands");
+        }
+
+        if (Ui.Group("Chat commands"))
+        {
         ImGui.TextDisabled("/tundy  ·  mini  ·  play <link>  ·  skip  ·  stop  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
 
-        ImGui.EndChild();
+        }
 
         if (changed)
             plugin.SaveConfig();

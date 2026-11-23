@@ -34,7 +34,7 @@ importer and sound replacer put songs on sound files that animations and the gam
 - Turn **TellTunes off** in `/xlplugins`. Turn **SoundyQ off** in `/soundyq` (Soundy itself can stay on for its
   import tools). While either one is also listening for the same tells, Tundy ignores requests and shows a red
   warning, because both would queue the same song.
-- TellTunes' allow and block lists become players in the Access tab (auto-approve and blocked).
+- TellTunes' allow and block lists become players in the People tab (auto-approve and blocked).
 - Tundy keeps its own copy of yt-dlp and its own song cache, so the first song may take a moment longer.
 
 ## License and credits
@@ -83,13 +83,13 @@ with a button to give it its normal sound back.
   button to remove broken entries (hold Ctrl).
 
 ## Requests
-- Friends send: `/tell You@World !q https://youtu.be/xxxxxxxxxxx`. The request commands are set in the **Access**
+- Friends send: `/tell You@World !q https://youtu.be/xxxxxxxxxxx`. The request commands are set in the **People**
   tab (yours were copied from SoundyQ: `!ytqueue`, `!q`, `!play`, `!p`).
 - `!q list` answers with what's playing, how many songs are waiting and where theirs is.
 - `!shuffle <playlist link>` queues a playlist shuffled, whatever the "Shuffle playlists" setting says; with the
   max songs per playlist that's a random selection from the whole playlist. A single song link is queued normally,
   and `!shuffle` alone does nothing (it never reorders other people's songs). Same rules as `!q` (who can request,
-  approval, cooldown). Change the shuffle commands, or turn them off, in the Access tab.
+  approval, cooldown). Change the shuffle commands, or turn them off, in the People tab.
 - The same YouTube video or Spotify track can't be in the queue twice ("That song is already in the queue.").
 - Spotify works too: `!q https://open.spotify.com/track/...` or a `spotify.link/...` share link from the phone app.
   Spotify audio is DRM-protected, so Tundy reads the song's title, all artists and exact length from its Spotify page,
@@ -97,7 +97,7 @@ with a button to give it its normal sound back.
   title words and artists, with a bonus for official uploads and points off for live, cover, sped-up, nightcore,
   karaoke and 1-hour versions unless the Spotify track is that version. You can turn Spotify off in Settings.
 
-## Who can request (Access tab)
+## Who can request (People tab)
 - **Anyone, straight into the queue** (SoundyQ's "Everyone Auto-Approve"), **Anyone, but I approve each request
   first** ("Everyone to Pre-Queue"), or **Only the players listed below** ("Listed Only").
 - **Players**: give someone their own setting: *Auto-approve*, *Needs approval* or *Blocked*, optionally for one
@@ -105,9 +105,9 @@ with a button to give it its normal sound back.
 - Blocked people's requests and `!skip` are ignored.
 
 ## Approving requests
-Requests that need approval wait at the top of the **Queue** tab, with the song's name looked up for you:
+Requests that need approval wait in the **Now playing** tab, with the song's name looked up for you:
 approve, approve and always approve that person, or reject. **Approve all** is there too, and so is
-`/tundy approve` (oldest first) or `/tundy approve all`. The status bar shows how many are waiting. With replies
+`/tundy approve` (oldest first) or `/tundy approve all`. A pill at the top of the panel shows how many are waiting. With replies
 on, people hear "Your request is waiting for approval.", then "Your request was approved. ..." or "Sorry, your
 request wasn't accepted."
 
@@ -150,7 +150,7 @@ Limits:
 People can send `/tell <you> !skip` to skip the song that's playing. Settings → **Skipping with !skip** →
 **Who can skip**: only the person who requested the song (default), anyone who's allowed to request songs, or
 nobody. Blocked people can't skip, one person can skip at most once every 10 seconds, and every `!skip` shows in
-the Requests tab.
+the Requests log (Queue tab).
 
 ## Replying to requesters (optional, off by default)
 Settings → **Reply to requesters**: after a request is accepted, the requester gets a tell such as "Your song is up
@@ -186,18 +186,17 @@ Send a playlist like a song: `!q <playlist link>`.
   a yt-dlp update before the last try. Songs that can never play (private, age-restricted, too long, live...) aren't.
 
 ## In-game control panel (`/tundy`)
-- **Status bar**: start/pause requests, who can request, how songs are shared, and requests waiting for approval.
-- **Player**: now playing, who sent it, a seek bar, skip/stop, volume and mute, what's up next, and a box to paste a link yourself.
-- **Sharing**: music mod or emote, music mod setup, timing and file size.
-- **Queue**: requests to approve, then play now, move up/down, remove, shuffle, clear (hold Ctrl).
-- **History**: songs played this session; play again, re-queue, or copy the link.
-- **Requests**: every request tell, with whether it was queued, is waiting, or why it was ignored.
-- **Access**: request commands, who can request, and per-player settings.
+Pastel purple look, with a switch back to Dalamud's normal look in Settings → Look.
+- **Top**: pills for accepting/paused requests, who can request, how songs are shared, and requests to approve. Click one to open its settings.
+- **Now playing**: the song, who sent it, a seek bar, skip/stop and volume; requests waiting for your approval; the next 3 songs; and a box to paste a link yourself.
+- **Queue**: play now, move up/down, remove, shuffle, clear (hold Ctrl), plus **History** (play again, re-queue, copy the link) and the **Requests log** (every request tell and what happened to it) as sections you can open.
+- **People**: request and shuffle commands, who can request, and per-player settings.
+- **Sharing**: a setup checklist, music mod or emote, music mod setup, timing and file size.
 - **Import**: add songs to mods, and the sound replacer.
-- **Settings**: Spotify, max length, queue limit, cooldown, skipping, replies, retries, playlists, announcements, files, download tools, clean up.
+- **Settings** (groups you can open and close): look, requests and cooldowns, announcements, skipping, replies, retries, playlists, playback, the Now playing window, download tools, clean up.
 
-**Now playing window** (`/tundy mini`, or the checkbox at the top of the panel): the song's name, who sent it, and a
-progress bar with elapsed / total time, plus a skip button.
+**Now playing window** (`/tundy mini`, or the window button at the top right of the panel): the song's name, a
+progress bar with elapsed / total time, skip and panel buttons, and who sent it.
 
 Chat commands: `/tundy mini | play <link> | skip | stop | approve [all] | import | on | off | share | mute | vol 0-100`
 

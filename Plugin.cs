@@ -627,6 +627,7 @@ public sealed partial class Plugin : IDalamudPlugin
                     {
                         Track = s.Spotify,
                         Playlist = contents.Name,
+                        Title = string.IsNullOrWhiteSpace(s.Title) ? null : s.Title,
                     }, force: true);
                 AddLog(sender, link.Url, $"Queued playlist {summary}", true);
                 Notify($"Queued {sender}'s playlist {summary}.");
@@ -796,7 +797,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Pending.Add(item);
         AddLog(sender, url, "Waiting for your approval", true);
         Replier.Send(encodedSender, sender, "Your request is waiting for approval.");
-        Chat.Print($"[Tundy] {sender} requested a {(playlist != null ? "playlist" : "song")}. Approve it in /tundy → Queue, or with /tundy approve.");
+        Chat.Print($"[Tundy] {sender} requested a {(playlist != null ? "playlist" : "song")}. Approve it in /tundy → Now playing, or with /tundy approve.");
 
         // Look up the name in the background so you can see what you're approving.
         _ = System.Threading.Tasks.Task.Run(async () =>

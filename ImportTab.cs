@@ -103,7 +103,7 @@ public sealed class ImportTab
         Ui.Help("The game sound files this mod puts its sounds on, most used first. The top one is usually the main one "
                 + "(sound/lolo.scd for the Mega Music Mod's DJ dance). Animations in the mod play these files.");
         if (routes.Count == 0)
-            ImGui.TextColored(ImGuiColors.DalamudOrange, "This mod doesn't put sounds on any sound file, so there's nothing to replace in it. Use the sound replacer below instead.");
+            ImGui.TextColored(Theme.Warn, "This mod doesn't put sounds on any sound file, so there's nothing to replace in it. Use the sound replacer below instead.");
         else
         {
             ImGui.BeginChild("routes", new Vector2(0, Math.Min(routes.Count, 5) * ImGui.GetFrameHeightWithSpacing() + 4), true);
@@ -126,7 +126,7 @@ public sealed class ImportTab
         if (cfg.ImportTargetMod == cfg.QueueTargetMod && cfg.BetweenSongsSilence)
         {
             ImGui.PushTextWrapPos();
-            ImGui.TextColored(ImGuiColors.DalamudOrange,
+            ImGui.TextColored(Theme.Warn,
                 "Tundy keeps this mod's song slot silent between requests, so you won't hear picked songs while Tundy is on. "
                 + "Change \"Between requests\" in the Sharing tab to hear them.");
             ImGui.PopTextWrapPos();
@@ -223,7 +223,7 @@ public sealed class ImportTab
         var importer = plugin.Importer;
         if (importer.Status.Length == 0) return;
         ImGui.PushTextWrapPos();
-        ImGui.TextColored(importer.Busy ? ImGuiColors.ParsedBlue : importer.StatusOk ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed,
+        ImGui.TextColored(importer.Busy ? Theme.Info : importer.StatusOk ? Theme.Good : Theme.Bad,
             importer.Busy && plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : importer.Status);
         ImGui.PopTextWrapPos();
     }

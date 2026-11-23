@@ -27,6 +27,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Keep the "Now playing" window from being moved by accident.</summary>
     public bool LockMiniPlayer { get; set; } = false;
 
+    /// <summary>Pastel purple look for Tundy's windows. Off = Dalamud's normal look.</summary>
+    public bool PastelTheme { get; set; } = true;
+
     /// <summary>Silence playback without losing the volume setting.</summary>
     public bool Muted { get; set; } = false;
 

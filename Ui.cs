@@ -45,8 +45,81 @@ public static class Ui
     public static void Section(string text)
     {
         ImGui.Spacing();
-        ImGui.TextColored(ImGuiColors.DalamudGrey, text);
+        ImGui.Spacing();
+        ImGui.TextColored(Theme.Heading, text);
         ImGui.Separator();
+        ImGui.Spacing();
+    }
+
+    /// <summary>Small caps-style label above a card's content.</summary>
+    public static void Label(string text) => ImGui.TextColored(Theme.Heading, text);
+
+    /// <summary>Settings group you can fold away. Returns true while it's open.</summary>
+    public static bool Group(string text, bool openByDefault = false)
+    {
+        ImGui.Spacing();
+        return ImGui.CollapsingHeader(text, openByDefault ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None);
+    }
+
+    /// <summary>Rounded, coloured status button. Returns true when clicked.</summary>
+    public static bool Pill(string label, Vector4 color, string tooltip)
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 12f * ImGuiHelpers.GlobalScale);
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(10, 3) * ImGuiHelpers.GlobalScale);
+        ImGui.PushStyleColor(ImGuiCol.Button, color with { W = 0.22f });
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, color with { W = 0.38f });
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, color with { W = 0.55f });
+        ImGui.PushStyleColor(ImGuiCol.Text, color);
+        var clicked = ImGui.Button(label);
+        ImGui.PopStyleColor(4);
+        ImGui.PopStyleVar(2);
+        Tooltip(tooltip);
+        return clicked;
+    }
+
+    /// <summary>Puts the next item on this line if it fits, otherwise on the next line.</summary>
+    public static void SameLineIfFits(float nextWidth)
+    {
+        ImGui.SameLine();
+        if (ImGui.GetCursorPosX() + nextWidth > ImGui.GetWindowContentRegionMax().X)
+            ImGui.NewLine();
+    }
+
+    private static readonly System.Collections.Generic.Stack<Vector2> CardStarts = new();
+
+    /// <summary>
+    /// Starts a card: a rounded panel behind everything up to <see cref="EndCard"/>. It grows with its content
+    /// (tables inside need ScrollY so they draw in their own child window).
+    /// </summary>
+    public static void BeginCard()
+    {
+        var pad = 10 * ImGuiHelpers.GlobalScale;
+        var dl = ImGui.GetWindowDrawList();
+        dl.ChannelsSplit(2);
+        dl.ChannelsSetCurrent(1);
+        CardStarts.Push(ImGui.GetCursorScreenPos());
+        ImGui.Dummy(new Vector2(0, pad - ImGui.GetStyle().ItemSpacing.Y));
+        ImGui.Indent(pad);
+        ImGui.BeginGroup();
+        // Leave room for the right padding so wrapped text stays inside the card.
+        ImGui.PushTextWrapPos(ImGui.GetContentRegionMax().X - pad);
+    }
+
+    public static void EndCard()
+    {
+        var pad = 10 * ImGuiHelpers.GlobalScale;
+        ImGui.PopTextWrapPos();
+        ImGui.EndGroup();
+        ImGui.Unindent(pad);
+        var bottom = ImGui.GetItemRectMax().Y + pad;
+        var start = CardStarts.Pop();
+        var right = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
+        var dl = ImGui.GetWindowDrawList();
+        dl.ChannelsSetCurrent(0);
+        dl.AddRectFilled(start, new Vector2(right, bottom), ImGui.GetColorU32(Theme.Card), 8 * ImGuiHelpers.GlobalScale);
+        dl.ChannelsMerge();
+        ImGui.Dummy(new Vector2(0, pad));
+        ImGui.Spacing();
     }
 
     public static void Tooltip(string text)
@@ -70,7 +143,7 @@ public static class Ui
         ImGui.PushID(uniqueId);
         var rule = name == "You" ? null : plugin.RuleFor(name);
         var blocked = rule?.Permission == RequestPermission.Blocked;
-        if (blocked) ImGui.PushStyleColor(ImGuiCol.Text, ImGuiColors.DalamudRed);
+        if (blocked) ImGui.PushStyleColor(ImGuiCol.Text, Theme.Bad);
         ImGui.Selectable(name);
         if (blocked) ImGui.PopStyleColor();
         if (name != "You")

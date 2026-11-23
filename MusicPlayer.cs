@@ -20,7 +20,11 @@ public sealed record SongRequest(string Url, string Sender, string? SpotifyId = 
     /// <summary>Name of the playlist this song came from, if any.</summary>
     public string? Playlist { get; init; }
     public DateTime RequestedAt { get; } = DateTime.Now;
-    public string Display => Track != null ? Track.Display : SpotifyId != null ? $"Spotify track {SpotifyId}" : Url;
+
+    /// <summary>The song's name once it's known (looked up in the background, or from the download).</summary>
+    public string? Title { get; set; }
+
+    public string Display => Title ?? (Track != null ? Track.Display : SpotifyId != null ? $"Spotify track {SpotifyId}" : Url);
 }
 
 /// <param name="ScdPath">Game sound file for sharing through Lightless, or null if not shared.</param>
@@ -136,7 +140,33 @@ public sealed class MusicPlayer : IDisposable
                 StartPrefetchLocked();
         }
         signal.Release();
+        LookUpTitle(req);
         return true;
+    }
+
+    // At most two name lookups at once, so a big playlist doesn't start dozens of yt-dlp processes.
+    private readonly SemaphoreSlim titleLookups = new(2);
+
+    /// <summary>Finds the song's name in the background so the queue shows it instead of the link.</summary>
+    private void LookUpTitle(SongRequest req)
+    {
+        if (req.Title != null || req.Track != null) return;
+        _ = Task.Run(async () =>
+        {
+            await titleLookups.WaitAsync();
+            try
+            {
+                if (req.Title != null) return; // the download got there first
+                string? title;
+                if (req.SpotifyId != null)
+                    title = (await SpotifyResolver.GetTrackAsync(await SpotifyResolver.ResolveIdAsync(req.SpotifyId, default), default)).Display;
+                else
+                    title = (await ytDlp.GetInfoAsync(req.Url, default))?.DisplayTitle;
+                if (!string.IsNullOrWhiteSpace(title)) req.Title ??= title;
+            }
+            catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't look up the name of {req.Url}"); }
+            finally { titleLookups.Release(); }
+        });
     }
 
     public void Remove(Guid id)
@@ -225,6 +255,7 @@ public sealed class MusicPlayer : IDisposable
             }
         }
         signal.Release();
+        LookUpTitle(req);
         Skip();
     }
 
@@ -442,6 +473,7 @@ public sealed class MusicPlayer : IDisposable
 
             var (file, downloadedTitle) = await DownloadWithRetriesAsync(req, target, ct);
             var title = spotifyName ?? downloadedTitle;
+            req.Title = title;
 
             // Some of YouTube's m4a files read as silent in Windows' decoder; this fixes them (also saved copies).
             try
