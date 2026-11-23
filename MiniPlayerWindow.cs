@@ -25,6 +25,7 @@ public sealed class MiniPlayerWindow : Window
     public override void PreDraw()
     {
         Flags = plugin.Config.LockMiniPlayer ? BaseFlags | ImGuiWindowFlags.NoMove : BaseFlags;
+        if (plugin.Config.CompactMiniPlayer) Flags |= ImGuiWindowFlags.NoTitleBar; // right-click it to hide it
         Theme.Push(plugin.Config.PastelTheme);
     }
 
@@ -33,6 +34,72 @@ public sealed class MiniPlayerWindow : Window
     public override void OnClose() => plugin.SetMiniPlayer(false);
 
     public override void Draw()
+    {
+        if (plugin.Config.CompactMiniPlayer) DrawCompact();
+        else DrawNormal();
+
+        // Right-click anywhere in the window
+        if (ImGui.BeginPopupContextWindow("miniMenu"))
+        {
+            var cfg = plugin.Config;
+            if (ImGui.MenuItem("Compact", "", cfg.CompactMiniPlayer)) { cfg.CompactMiniPlayer = !cfg.CompactMiniPlayer; plugin.SaveConfig(); }
+            if (ImGui.MenuItem("Lock position", "", cfg.LockMiniPlayer)) { cfg.LockMiniPlayer = !cfg.LockMiniPlayer; plugin.SaveConfig(); }
+            if (ImGui.MenuItem("Open the control panel")) plugin.ToggleMainWindow();
+            if (ImGui.MenuItem("Hide")) plugin.SetMiniPlayer(false);
+            ImGui.EndPopup();
+        }
+    }
+
+    /// <summary>Cover, song name and a thin time bar with skip, then the next song.</summary>
+    private void DrawCompact()
+    {
+        var scale = ImGuiHelpers.GlobalScale;
+        var width = 240 * scale;
+        var np = plugin.NowPlaying();
+        var spacing = ImGui.GetStyle().ItemSpacing.X;
+        var cover = 36 * scale;
+        var button = ImGui.GetFrameHeight();
+
+        if (plugin.Config.ShowCoverArt)
+        {
+            Ui.Cover(plugin, np.CoverId, cover);
+            ImGui.SameLine();
+        }
+        var middle = width - button - spacing - (plugin.Config.ShowCoverArt ? cover + spacing : 0);
+        ImGui.BeginGroup();
+        if (np.Title != null)
+        {
+            ImGui.TextUnformatted(Ui.Ellipsize(np.Title, middle));
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{np.Title}{(np.Requester != null ? $"\nfrom {np.Requester}" : "")}");
+        }
+        else
+        {
+            ImGui.TextDisabled(np.Source == "Syncing" ? "Getting it ready..." : "Nothing playing");
+        }
+        ImGui.Dummy(new Vector2(0, 2 * scale));
+        var elapsed = np.Elapsed;
+        var total = np.Duration;
+        var fraction = elapsed is { } e && total is { } t && t > TimeSpan.Zero
+            ? (float)Math.Clamp(e.TotalSeconds / t.TotalSeconds, 0, 1)
+            : 0f;
+        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, Theme.Active ? Theme.LavenderLight with { W = 0.85f } : Theme.Info);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3f * scale);
+        ImGui.ProgressBar(fraction, new Vector2(middle, 6 * scale), "");
+        ImGui.PopStyleVar();
+        ImGui.PopStyleColor();
+        if (np.Title != null && ImGui.IsItemHovered())
+            ImGui.SetTooltip(elapsed == null ? "Starts counting when the emote plays the song." : $"{Time(elapsed)} / {Time(total)}");
+        ImGui.EndGroup();
+
+        ImGui.SameLine();
+        if (Ui.IconButton("skip", FontAwesomeIcon.StepForward, "Skip to the next song", !plugin.CanSkip))
+            plugin.Skip();
+
+        if (plugin.NextSong is { } next)
+            ImGui.TextColored(Theme.Muted, Ui.Ellipsize($"Next: {next.Display}", width));
+    }
+
+    private void DrawNormal()
     {
         var scale = ImGuiHelpers.GlobalScale;
         var width = Width * scale;

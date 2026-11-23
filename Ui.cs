@@ -105,7 +105,10 @@ public static class Ui
         ImGui.PushTextWrapPos(ImGui.GetContentRegionMax().X - pad);
     }
 
-    public static void EndCard()
+    public static void EndCard() => EndCard(Theme.Card, null);
+
+    /// <param name="border">Optional outline colour (used by the problems banner).</param>
+    public static void EndCard(Vector4 background, Vector4? border)
     {
         var pad = 10 * ImGuiHelpers.GlobalScale;
         ImGui.PopTextWrapPos();
@@ -116,10 +119,69 @@ public static class Ui
         var right = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
         var dl = ImGui.GetWindowDrawList();
         dl.ChannelsSetCurrent(0);
-        dl.AddRectFilled(start, new Vector2(right, bottom), ImGui.GetColorU32(Theme.Card), 8 * ImGuiHelpers.GlobalScale);
+        var rounding = 8 * ImGuiHelpers.GlobalScale;
+        dl.AddRectFilled(start, new Vector2(right, bottom), ImGui.GetColorU32(background), rounding);
+        if (border is { } b) dl.AddRect(start, new Vector2(right, bottom), ImGui.GetColorU32(b), rounding);
         dl.ChannelsMerge();
         ImGui.Dummy(new Vector2(0, pad));
         ImGui.Spacing();
+    }
+
+    /// <summary>"3:45", or "" when unknown.</summary>
+    public static string Length(int? seconds) => seconds is > 0 ? Time(seconds.Value) : "";
+
+    /// <summary>"about 38 min" / "about 1 h 20 min".</summary>
+    public static string About(int seconds)
+    {
+        var minutes = (int)Math.Round(seconds / 60.0);
+        if (minutes < 1) return "under a minute";
+        return minutes < 60 ? $"about {minutes} min" : $"about {minutes / 60} h {minutes % 60} min";
+    }
+
+    /// <summary>Cuts text to fit <paramref name="width"/>, ending in "...".</summary>
+    public static string Ellipsize(string text, float width)
+    {
+        if (ImGui.CalcTextSize(text).X <= width) return text;
+        const string dots = "...";
+        var lo = 0;
+        var hi = text.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            if (ImGui.CalcTextSize(text[..mid] + dots).X <= width) lo = mid;
+            else hi = mid - 1;
+        }
+        return text[..lo].TrimEnd() + dots;
+    }
+
+    /// <summary>
+    /// The song's cover as a rounded square (the middle of its YouTube thumbnail), or a record icon while there's
+    /// none. Takes <paramref name="size"/> x <paramref name="size"/> of space.
+    /// </summary>
+    public static void Cover(Plugin plugin, string? videoId, float size)
+    {
+        var dl = ImGui.GetWindowDrawList();
+        var min = ImGui.GetCursorScreenPos();
+        var max = min + new Vector2(size);
+        var rounding = 6 * ImGuiHelpers.GlobalScale;
+        var tex = plugin.Config.ShowCoverArt ? plugin.Covers.Get(videoId) : null;
+        if (tex != null)
+        {
+            // Thumbnails are 16:9: show the middle square.
+            var aspect = tex.Width > 0 ? (float)tex.Height / tex.Width : 9f / 16f;
+            var side = (1 - aspect) / 2;
+            dl.AddImageRounded(tex.Handle, min, max, new Vector2(side, 0), new Vector2(1 - side, 1), 0xFFFFFFFF, rounding);
+        }
+        else
+        {
+            dl.AddRectFilled(min, max, ImGui.GetColorU32(Theme.Active ? Theme.LavenderDeep : new Vector4(1, 1, 1, 0.08f)), rounding);
+            ImGui.PushFont(UiBuilder.IconFont);
+            var icon = FontAwesomeIcon.Music.ToIconString();
+            var iconSize = ImGui.CalcTextSize(icon);
+            dl.AddText(min + (new Vector2(size) - iconSize) / 2, ImGui.GetColorU32(Theme.Active ? Theme.LavenderLight : Theme.Muted), icon);
+            ImGui.PopFont();
+        }
+        ImGui.Dummy(new Vector2(size));
     }
 
     public static void Tooltip(string text)

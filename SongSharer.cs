@@ -105,8 +105,19 @@ public sealed class SongSharer : IDisposable
     public string Status { get; private set; } = "Idle";
 
     /// <summary>Plain-language result of the last share, shown in the Sharing tab.</summary>
-    public string LastCheck { get; private set; } = "No song shared yet.";
+    public string LastCheck { get; private set; } = NotCheckedYet;
     public bool LastCheckOk { get; private set; } = true;
+
+    private const string NotCheckedYet = "No song shared yet.";
+
+    /// <summary>True once a song or a test has been checked this session.</summary>
+    public bool HasChecked => LastCheck != NotCheckedYet;
+
+    /// <summary>When your character last loaded one of SoundyQ's songs on the song slot (see OnResourceResolved).</summary>
+    public DateTime SoundyQSeenOnSlotAt { get; private set; } = DateTime.MinValue;
+
+    /// <summary>True while "Test now" runs.</summary>
+    public bool Testing { get; private set; }
 
     /// <summary>Last error the game printed right after we did the emote (e.g. emote not learned).</summary>
     public string? LastGameError { get; private set; }
@@ -165,6 +176,12 @@ public sealed class SongSharer : IDisposable
     // Called by Penumbra (possibly off the main thread) whenever an object loads a modded file.
     private void OnResourceResolved(nint gameObject, string gamePath, string localPath)
     {
+        // SoundyQ keeps its songs in the music mod's "soundy\soundyq" folder and puts them on the song slot with a
+        // temporary mod, which wins over Tundy Song. Seeing your character load one means SoundyQ holds the slot.
+        if (gameObject != 0 && gameObject == playerAddress
+            && localPath.Replace('/', '\\').Contains("\\soundyq\\", StringComparison.OrdinalIgnoreCase))
+            SoundyQSeenOnSlotAt = DateTime.Now;
+
         // Only Tundy Song's own files count: the music mod also puts a file on the song slot, and seeing that one
         // load says nothing about whether the song is on.
         if (!localPath.Replace('/', '\\').Contains("\\" + ModFolderName + "\\", StringComparison.OrdinalIgnoreCase)) return;
@@ -297,16 +314,103 @@ public sealed class SongSharer : IDisposable
         ReportLoad(emote, startedAt, priming: false);
     }
 
-    private void ReportLoad(ShareEmote emote, DateTime since, bool priming)
+    /// <summary>
+    /// "Test now" in the Sharing tab, while nothing plays: puts Tundy's between-songs sound on the slot (silence for
+    /// the music mod, the emote's own sound otherwise), does the emote once, and checks the game loaded Tundy's file
+    /// for your character, which is what Lightless sends. It also teaches Lightless the slot the first time.
+    /// </summary>
+    public async Task TestAsync()
+    {
+        if (Testing) return;
+        Testing = true;
+        try
+        {
+            var emote = Emote;
+            Status = "Testing...";
+            await framework.RunOnFrameworkThread(() =>
+            {
+                SetEmoteSound(emote, null, forceSilence: true);
+                LastGameError = null;
+                redraw.Invoke(0, RedrawType.Redraw);
+            });
+            await Task.Delay(2000); // let the redraw finish
+            var since = DateTime.Now;
+            await PerformEmoteAsync(emote);
+            await WaitForAsync(() => LoadedForPlayerSince(emote.ScdPath, since), 6, () => false, default);
+            ReportLoad(emote, since, priming: false, test: true);
+            // Set to "the music mod's own song" between songs: take the test's silence off again.
+            if (emote.Routes != null && !config.BetweenSongsSilence)
+                await framework.RunOnFrameworkThread(() => SetEmoteSound(emote, null));
+        }
+        catch (Exception ex)
+        {
+            Plugin.Log.Warning(ex, "Share test failed");
+            LastCheckOk = false;
+            LastCheck = $"The test couldn't run: {ex.Message}";
+        }
+        finally
+        {
+            Testing = false;
+            Status = "Idle";
+        }
+    }
+
+    // Emote row id per command, or null when it's not an emote; 0 unlock link = everyone has it.
+    private readonly Dictionary<string, (uint Id, uint UnlockLink)?> emoteIds = new(StringComparer.OrdinalIgnoreCase);
+    private (string Command, bool? Owned, DateTime At) ownedCache = ("", null, DateTime.MinValue);
+
+    /// <summary>
+    /// Whether your character has learned the emote that plays the songs (checked at most every 5 seconds). Null
+    /// when it can't be told (not logged in, or not an emote the game knows).
+    /// </summary>
+    public bool? EmoteOwned()
+    {
+        var command = Emote.Command;
+        if (ownedCache.Command == command && (DateTime.Now - ownedCache.At).TotalSeconds < 5) return ownedCache.Owned;
+        bool? owned = null;
+        try { owned = CheckEmoteOwned(command); }
+        catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't check whether {command} is learned"); }
+        ownedCache = (command, owned, DateTime.Now);
+        return owned;
+    }
+
+    private unsafe bool? CheckEmoteOwned(string command)
+    {
+        if (objects.LocalPlayer == null) return null;
+        if (!emoteIds.TryGetValue(command, out var id))
+        {
+            id = null;
+            foreach (var row in data.GetExcelSheet<Lumina.Excel.Sheets.Emote>())
+            {
+                if (row.TextCommand.ValueNullable is not { } tc) continue;
+                if (new[] { tc.Command, tc.ShortCommand, tc.Alias, tc.ShortAlias }
+                    .Any(s => s.ExtractText().Equals(command, StringComparison.OrdinalIgnoreCase)))
+                {
+                    id = (row.RowId, row.UnlockLink);
+                    break;
+                }
+            }
+            emoteIds[command] = id;
+        }
+        if (id is not { } e) return null;
+        if (e.UnlockLink == 0) return true; // everyone has it
+        var ui = FFXIVClientStructs.FFXIV.Client.Game.UI.UIState.Instance();
+        return ui == null ? null : ui->IsEmoteUnlocked((ushort)e.Id);
+    }
+
+    private void ReportLoad(ShareEmote emote, DateTime since, bool priming, bool test = false)
     {
         var sound = LoadedForPlayerSince(emote.ScdPath, since);
         var anim = emote.SwapFromKey == null || LoadedForPlayerSince($"chara/action/{emote.SwapFromKey}.tmb", since);
         var wrongObject = !sound && LoadedForOtherSince(emote.ScdPath, since);
+        var soundyQ = !sound && SoundyQSeenOnSlotAt >= since;
 
         if (sound)
         {
             LastCheckOk = true;
-            LastCheck = priming
+            LastCheck = test
+                ? $"Test passed: {emote.Command} loaded Tundy's sound file for your character, so Lightless can send songs to your pairs."
+                : priming
                 ? $"Lightless saw your character use {emote.Command}'s sound. It can send songs on it to your pairs now."
                 : $"The song played on {emote.Command} for your character, so Lightless is sending it to your pairs.";
         }
@@ -315,6 +419,8 @@ public sealed class SongSharer : IDisposable
             LastCheckOk = false;
             LastCheck = LastGameError != null
                 ? $"{emote.Command} didn't play: the game said \"{LastGameError}\""
+                : soundyQ
+                    ? "SoundyQ's song was on the music mod's song slot instead of Tundy's, so nobody hears yours. Turn SoundyQ off in /soundyq."
                 : wrongObject
                     ? $"The song loaded, but not for your character, so Lightless won't send it. Try another emote."
                     : !anim
@@ -448,7 +554,8 @@ public sealed class SongSharer : IDisposable
     ///   emote sounds normal, and Lightless keeps remembering it, so the next song goes out right away.
     /// Must run on the framework thread.
     /// </summary>
-    private void SetEmoteSound(ShareEmote emote, string? songFile)
+    /// <param name="forceSilence">Music mod: put silence on the slot even when set to play the mod's own song between songs (for "Test now").</param>
+    private void SetEmoteSound(ShareEmote emote, string? songFile, bool forceSilence = false)
     {
         var modDir = EnsureModFolder();
         var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -470,7 +577,7 @@ public sealed class SongSharer : IDisposable
             File.WriteAllBytes(Path.Combine(modDir, soundRel), original);
             files[emote.ScdPath] = soundRel;
         }
-        else if (!config.BetweenSongsSilence)
+        else if (!config.BetweenSongsSilence && !forceSilence)
         {
             // Music mod between songs, set to "the music mod's own song": nothing on the slot, so the track picked
             // in the music mod (e.g. one imported with Tundy) plays when you dance.

@@ -9,6 +9,8 @@ using Dalamud.Game.Command;
 using Dalamud.Game.Config;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
+using Dalamud.Interface;
+using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -20,7 +22,8 @@ public sealed record RequestLogEntry(DateTime Time, string Sender, string Link, 
 
 /// <param name="Elapsed">Null when the start time isn't known.</param>
 /// <param name="Source">"Music mod", "Lightless", "Tundy" or "Syncing".</param>
-public sealed record NowPlayingInfo(string? Title, string? Requester, TimeSpan? Elapsed, TimeSpan? Duration, string Source);
+/// <param name="CoverId">YouTube video id for the song's cover, if known.</param>
+public sealed record NowPlayingInfo(string? Title, string? Requester, TimeSpan? Elapsed, TimeSpan? Duration, string Source, string? CoverId = null);
 
 public sealed partial class Plugin : IDalamudPlugin
 {
@@ -35,6 +38,16 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
+    [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+
+    /// <summary>Song covers for the player (YouTube thumbnails).</summary>
+    public CoverArt Covers { get; }
+
+    /// <summary>The song as your character's title, through the Honorific plugin.</summary>
+    public HonorificTitle Honorific { get; }
+
+    /// <summary>A bigger font for the song's name in the player.</summary>
+    public IFontHandle TitleFont { get; }
 
     public Configuration Config { get; }
     public MusicPlayer Player { get; }
@@ -112,6 +125,15 @@ public sealed partial class Plugin : IDalamudPlugin
         Player = new MusicPlayer(YtDlp, Sharer, Path.Combine(dir, "cache"), Config, Notify,
             (req, err) => AddLog(req.Sender, req.Url, $"Failed: {err}", false));
         Player.TrackStarted += t => Announcer.SongStarted(t.Title, t.Request.Sender);
+        Covers = new CoverArt(TextureProvider, Path.Combine(dir, "covers"));
+        Honorific = new HonorificTitle(PluginInterface, Framework, ObjectTable, Config, () =>
+            (Player.Current?.Title, Player.CurrentIsShared, Player.WaitingForSync || Player.Downloading != null || Player.PendingCount > 0));
+        TitleFont = PluginInterface.UiBuilder.FontAtlas.NewDelegateFontHandle(e => e.OnPreBuild(tk =>
+        {
+            var size = UiBuilder.DefaultFontSizePx * 1.35f;
+            var font = tk.AddDalamudDefaultFont(size);
+            tk.AttachExtraGlyphsForDalamudLanguage(new SafeFontConfig { SizePx = size, MergeFont = font });
+        }));
 
         mainWindow = new MainWindow(this);
         miniWindow = new MiniPlayerWindow(this) { IsOpen = Config.ShowMiniPlayer };
@@ -134,6 +156,8 @@ public sealed partial class Plugin : IDalamudPlugin
             Chat.PrintError("[Tundy] TellTunes is also on. Tundy ignores song requests until you turn TellTunes off in /xlplugins.");
         if (SoundyQListening)
             Chat.PrintError("[Tundy] SoundyQ (in Soundy) is also on and answers the same tells. Tundy ignores song requests until you turn SoundyQ off in /soundyq.");
+        else if (SoundyQHoldsSongSlot)
+            Chat.PrintError("[Tundy] SoundyQ (in Soundy) is on and holds the music mod's song slot, so nearby players won't hear Tundy's songs. Turn SoundyQ off in /soundyq.");
 
         // Get the download tools ready in the background so the first request is fast:
         // yt-dlp, deno (yt-dlp needs it for YouTube), and a yt-dlp update at most once a day.
@@ -288,30 +312,60 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         get
         {
-            if ((DateTime.Now - soundyCheckedAt).TotalSeconds < 2) return soundyQListening;
-            soundyCheckedAt = DateTime.Now;
-            try
-            {
-                if (!PluginInterface.InstalledPlugins.Any(p => p.IsLoaded && p.InternalName == "Soundy"))
-                    return soundyQListening = false;
-
-                var file = Path.Combine(Directory.GetParent(PluginInterface.GetPluginConfigDirectory())!.FullName, "Soundy.json");
-                if (File.Exists(file) && File.GetLastWriteTimeUtc(file) != soundyFileWrite)
-                {
-                    soundyFileWrite = File.GetLastWriteTimeUtc(file);
-                    using var doc = JsonDocument.Parse(File.ReadAllText(file));
-                    var root = doc.RootElement;
-                    soundyQEnabled = root.TryGetProperty("SoundyQEnabled", out var en) && en.ValueKind == JsonValueKind.True;
-                    soundyQAliases = root.TryGetProperty("SoundyQAliases", out var a) && a.ValueKind == JsonValueKind.Array
-                        ? a.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!.Trim()).ToList()
-                        : new List<string> { "!ytqueue" };
-                }
-                soundyQListening = soundyQEnabled && soundyQAliases.Intersect(RequestCommands, StringComparer.OrdinalIgnoreCase).Any();
-            }
-            catch (IOException) { /* Soundy is writing the file; check again later */ }
-            catch (Exception ex) { Log.Debug(ex, "Couldn't check SoundyQ"); }
+            RefreshSoundyQ();
             return soundyQListening;
         }
+    }
+
+    private bool soundyQOn;
+
+    /// <summary>
+    /// True while SoundyQ is on and songs are shared through the music mod. SoundyQ puts its song on the music mod's
+    /// song slot (sound/lolo.scd) as a Penumbra temporary mod, and temporary mods win over normal ones like "Tundy
+    /// Song", whatever request commands either one uses. Nearby players then hear SoundyQ's song (or nothing)
+    /// instead of Tundy's. Also true when the game was seen loading SoundyQ's file on the slot in the last 10 minutes.
+    /// </summary>
+    public bool SoundyQHoldsSongSlot
+    {
+        get
+        {
+            RefreshSoundyQ();
+            if (!Sharer.CanShare || !Sharer.UsesMusicMod) return false;
+            return soundyQOn || (soundyLoaded && (DateTime.Now - Sharer.SoundyQSeenOnSlotAt).TotalMinutes < 10);
+        }
+    }
+
+    private bool soundyLoaded;
+
+    private void RefreshSoundyQ()
+    {
+        if ((DateTime.Now - soundyCheckedAt).TotalSeconds < 2) return;
+        soundyCheckedAt = DateTime.Now;
+        try
+        {
+            soundyLoaded = PluginInterface.InstalledPlugins.Any(p => p.IsLoaded && p.InternalName == "Soundy");
+            if (!soundyLoaded)
+            {
+                soundyQListening = soundyQOn = false;
+                return;
+            }
+
+            var file = Path.Combine(Directory.GetParent(PluginInterface.GetPluginConfigDirectory())!.FullName, "Soundy.json");
+            if (File.Exists(file) && File.GetLastWriteTimeUtc(file) != soundyFileWrite)
+            {
+                soundyFileWrite = File.GetLastWriteTimeUtc(file);
+                using var doc = JsonDocument.Parse(File.ReadAllText(file));
+                var root = doc.RootElement;
+                soundyQEnabled = root.TryGetProperty("SoundyQEnabled", out var en) && en.ValueKind == JsonValueKind.True;
+                soundyQAliases = root.TryGetProperty("SoundyQAliases", out var a) && a.ValueKind == JsonValueKind.Array
+                    ? a.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!.Trim()).ToList()
+                    : new List<string> { "!ytqueue" };
+            }
+            soundyQOn = soundyQEnabled;
+            soundyQListening = soundyQEnabled && soundyQAliases.Intersect(RequestCommands, StringComparer.OrdinalIgnoreCase).Any();
+        }
+        catch (IOException) { /* Soundy is writing the file; check again later */ }
+        catch (Exception ex) { Log.Debug(ex, "Couldn't check SoundyQ"); }
     }
 
     /// <summary>Opens SoundyQ's window (to turn it off there).</summary>
@@ -628,6 +682,7 @@ public sealed partial class Plugin : IDalamudPlugin
                         Track = s.Spotify,
                         Playlist = contents.Name,
                         Title = string.IsNullOrWhiteSpace(s.Title) ? null : s.Title,
+                        Seconds = s.Seconds,
                     }, force: true);
                 AddLog(sender, link.Url, $"Queued playlist {summary}", true);
                 Notify($"Queued {sender}'s playlist {summary}.");
@@ -807,9 +862,17 @@ public sealed partial class Plugin : IDalamudPlugin
                 if (playlist != null)
                     item.Title = shuffle ? "Playlist (shuffled)" : "Playlist";
                 else if (spotifyId != null && !spotifyId.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                    item.Title = (await SpotifyResolver.GetTrackAsync(spotifyId, default)).Display;
+                {
+                    var t = await SpotifyResolver.GetTrackAsync(spotifyId, default);
+                    item.Seconds = t.DurationSeconds;
+                    item.Title = t.Display;
+                }
                 else if (spotifyId == null)
-                    item.Title = (await YtDlp.GetInfoAsync(url, default))?.DisplayTitle;
+                {
+                    var info = await YtDlp.GetInfoAsync(url, default);
+                    item.Seconds = info?.Seconds;
+                    item.Title = info?.DisplayTitle;
+                }
             }
             catch (Exception ex) { Log.Debug(ex, $"Couldn't look up {url}"); }
         });
@@ -866,7 +929,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         var source = Player.CurrentIsShared ? (Sharer.UsesMusicMod ? "Music mod" : "Lightless") : "Tundy";
         if (Player.Current is { } track)
-            return new NowPlayingInfo(track.Title, track.Request.Sender, Player.Position, Player.Duration, source);
+            return new NowPlayingInfo(track.Title, track.Request.Sender, Player.Position, Player.Duration, source, track.Request.CoverId);
         return new NowPlayingInfo(null, null, null, null, Player.WaitingForSync ? "Syncing" : "Tundy");
     }
 
@@ -887,6 +950,12 @@ public sealed partial class Plugin : IDalamudPlugin
     }
 
     public void ToggleMainWindow() => mainWindow.Toggle();
+
+    /// <summary>Opens Dalamud's plugin list (to turn TellTunes off there).</summary>
+    public void OpenPluginList() => CommandManager.ProcessCommand("/xlplugins");
+
+    /// <summary>The song after the current one, for the mini player.</summary>
+    public SongRequest? NextSong => Player.FullQueue() is { Length: > 0 } q ? q[0].Request : null;
 
     private void OpenSettings()
     {
@@ -996,7 +1065,10 @@ public sealed partial class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= OpenSettings;
         PluginInterface.UiBuilder.OpenMainUi -= mainWindow.Toggle;
         windows.RemoveAllWindows();
+        Honorific.Dispose();
         Player.Dispose();
         Sharer.Dispose();
+        TitleFont.Dispose();
+        Covers.Dispose();
     }
 }

@@ -25,6 +25,16 @@ public sealed record SongRequest(string Url, string Sender, string? SpotifyId = 
     public string? Title { get; set; }
 
     public string Display => Title ?? (Track != null ? Track.Display : SpotifyId != null ? $"Spotify track {SpotifyId}" : Url);
+
+    /// <summary>The song's length in seconds once it's known (from the lookup, the playlist or Spotify).</summary>
+    public int? Seconds { get; set; }
+
+    public int? KnownSeconds => Seconds ?? Track?.DurationSeconds;
+
+    /// <summary>The YouTube video the song comes from (for Spotify links, the matched one once it's found), for its cover.</summary>
+    public string? VideoId { get; set; }
+
+    public string? CoverId => VideoId ?? RetryPolicy.YouTubeId(Url);
 }
 
 /// <param name="ScdPath">Game sound file for sharing through Lightless, or null if not shared.</param>
@@ -150,19 +160,27 @@ public sealed class MusicPlayer : IDisposable
     /// <summary>Finds the song's name in the background so the queue shows it instead of the link.</summary>
     private void LookUpTitle(SongRequest req)
     {
-        if (req.Title != null || req.Track != null) return;
+        if ((req.Title != null && req.KnownSeconds != null) || req.Track != null) return;
         _ = Task.Run(async () =>
         {
             await titleLookups.WaitAsync();
             try
             {
-                if (req.Title != null) return; // the download got there first
+                if (req.Title != null && req.KnownSeconds != null) return; // the download got there first
                 string? title;
+                int? seconds;
                 if (req.SpotifyId != null)
-                    title = (await SpotifyResolver.GetTrackAsync(await SpotifyResolver.ResolveIdAsync(req.SpotifyId, default), default)).Display;
+                {
+                    var t = await SpotifyResolver.GetTrackAsync(await SpotifyResolver.ResolveIdAsync(req.SpotifyId, default), default);
+                    (title, seconds) = (t.Display, t.DurationSeconds);
+                }
                 else
-                    title = (await ytDlp.GetInfoAsync(req.Url, default))?.DisplayTitle;
+                {
+                    var info = await ytDlp.GetInfoAsync(req.Url, default);
+                    (title, seconds) = (info?.DisplayTitle, info?.Seconds);
+                }
                 if (!string.IsNullOrWhiteSpace(title)) req.Title ??= title;
+                req.Seconds ??= seconds;
             }
             catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't look up the name of {req.Url}"); }
             finally { titleLookups.Release(); }
@@ -471,6 +489,7 @@ public sealed class MusicPlayer : IDisposable
                 spotifyName = track.Display; // show Spotify's own "Artist - Title", not the YouTube video's title
             }
 
+            req.VideoId ??= RetryPolicy.YouTubeId(target);
             var (file, downloadedTitle) = await DownloadWithRetriesAsync(req, target, ct);
             var title = spotifyName ?? downloadedTitle;
             req.Title = title;
@@ -542,6 +561,7 @@ public sealed class MusicPlayer : IDisposable
                 var song = await ytDlp.DownloadAudioAsync(target, keep ? library.Folder : cacheDir, config.MaxDurationSeconds, ct,
                     keep ? videoId : null);
                 var title = song.DisplayTitle;
+                req.Seconds ??= song.Seconds;
                 if (keep) library.Save(videoId!, title, song.File);
                 return (song.File, title);
             }

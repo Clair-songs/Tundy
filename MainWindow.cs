@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -56,7 +56,7 @@ public sealed class MainWindow : Window
     public override void Draw()
     {
         DrawStatusBar();
-        DrawConflicts();
+        DrawProblems();
         ImGui.Spacing();
         DrawTabStrip();
         ImGui.Separator();
@@ -75,21 +75,95 @@ public sealed class MainWindow : Window
         ImGui.EndChild();
     }
 
-    private void DrawConflicts()
+    /// <summary>Something stops Tundy from working right, with one button that fixes it (or opens where to fix it).</summary>
+    private sealed record Problem(string Title, string Detail, string? Button, Action? Fix);
+
+    private List<Problem> FindProblems()
     {
-        if (!plugin.TellTunesLoaded && !plugin.SoundyQListening) return;
+        var list = new List<Problem>();
+        var sharer = plugin.Sharer;
+        var cfg = plugin.Config;
+
+        if (plugin.TellTunesLoaded)
+            list.Add(new Problem("TellTunes is also on",
+                "Both answer the same tells, so Tundy ignores song requests until TellTunes is off.",
+                "Open the plugin list", plugin.OpenPluginList));
+
+        if (plugin.SoundyQListening)
+            list.Add(new Problem("SoundyQ answers the same tells",
+                "SoundyQ (in Soundy) listens for the same request command, so Tundy ignores song requests. "
+                + "Untick SoundyQ in its window. Soundy's other tools can stay on.",
+                "Open SoundyQ", plugin.OpenSoundyQ));
+        else if (plugin.SoundyQHoldsSongSlot)
+            list.Add(new Problem("SoundyQ is holding the song slot",
+                "SoundyQ puts its own song on the music mod's song slot, and it wins over Tundy's, so nearby players hear "
+                + "SoundyQ's song (or nothing) instead of yours. Untick SoundyQ in its window. Soundy's other tools can stay on.",
+                "Open SoundyQ", plugin.OpenSoundyQ));
+
+        if (!cfg.ShareViaLightless) return list;
+
+        if (!sharer.PenumbraAvailable)
+        {
+            list.Add(new Problem("Penumbra isn't running",
+                "Songs play only for you until Penumbra is on: it puts the song on your character.", null, null));
+            return list;
+        }
+
+        if (sharer.UsesMusicMod)
+        {
+            var setup = plugin.Music.SetupProblems();
+            if (setup.Count > 0)
+            {
+                var canSetUp = plugin.Music.IsRecommended && plugin.Music.State().Installed;
+                list.Add(new Problem("The music mod needs setting up", setup[0],
+                    canSetUp ? "Set it up for me" : "Open Sharing",
+                    canSetUp ? () => megaSetupResult = plugin.Music.SetUp() : OpenHowItPlays));
+            }
+
+            if (plugin.Ffmpeg.CurrentPath == null)
+                list.Add(new Problem("ffmpeg isn't installed",
+                    plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : "The music mod needs it to convert songs (about 120 MB, once).",
+                    plugin.Ffmpeg.Downloading ? null : "Install ffmpeg",
+                    () => _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { })));
+        }
+
+        if (sharer.EmoteOwned() == false)
+            list.Add(new Problem($"Your character hasn't learned {sharer.Emote.Command}",
+                sharer.UsesMusicMod
+                    ? $"The music mod's dance plays the songs, and it's on {sharer.Emote.Command}. Learn that emote, or put the dance on one you have."
+                    : $"The songs play when your character does {sharer.Emote.Command}. Learn it, or pick another emote in Sharing.",
+                "Open Sharing", OpenHowItPlays));
+
+        if (sharer.HasChecked && !sharer.LastCheckOk && !plugin.SoundyQHoldsSongSlot)
+            list.Add(new Problem("The last song didn't play for others", sharer.LastCheck, "Open Sharing", () => page = Page.Sharing));
+
+        return list;
+    }
+
+    private void DrawProblems()
+    {
+        var problems = FindProblems();
+        if (problems.Count == 0) return;
+
         ImGui.Spacing();
         Ui.BeginCard();
-        if (plugin.TellTunesLoaded)
-            ImGui.TextColored(Theme.Bad, "TellTunes is also on, so Tundy ignores song requests. Turn TellTunes off in /xlplugins.");
-        if (plugin.SoundyQListening)
+        for (var i = 0; i < problems.Count; i++)
         {
-            ImGui.TextColored(Theme.Bad,
-                "SoundyQ (in Soundy) is also on and answers the same tells, so Tundy ignores song requests. "
-                + "Turn SoundyQ off in its window (Soundy's other tools can stay on).");
-            if (ImGui.SmallButton("Open SoundyQ")) plugin.OpenSoundyQ();
+            var p = problems[i];
+            ImGui.PushID($"problem{i}");
+            if (i > 0) ImGui.Spacing();
+            ImGui.PushFont(UiBuilder.IconFont);
+            ImGui.TextColored(Theme.Bad, FontAwesomeIcon.ExclamationTriangle.ToIconString());
+            ImGui.PopFont();
+            ImGui.SameLine();
+            ImGui.BeginGroup();
+            ImGui.TextColored(Theme.Bad, p.Title);
+            ImGui.TextColored(Theme.Muted, p.Detail);
+            if (p.Button != null && p.Fix != null && ImGui.Button(p.Button)) p.Fix();
+            ImGui.EndGroup();
+            ImGui.PopID();
         }
-        Ui.EndCard();
+        Ui.EndCard(Theme.Bad with { W = 0.12f }, Theme.Bad with { W = 0.45f });
     }
 
     private void DrawTabStrip()
@@ -202,39 +276,53 @@ public sealed class MainWindow : Window
     {
         var player = plugin.Player;
 
-        // Now playing card
+        // Now playing card: cover on the left, the song and its controls on the right
         Ui.BeginCard();
+        var scale = ImGuiHelpers.GlobalScale;
+        var coverSize = 92 * scale;
+        var showCover = plugin.Config.ShowCoverArt && ImGui.GetContentRegionAvail().X > 360 * scale;
+        var coverId = player.Current?.Request.CoverId ?? (player.WaitingForSync ? null : player.Downloading?.CoverId);
+        if (showCover)
+        {
+            Ui.Cover(plugin, coverId, coverSize);
+            ImGui.SameLine(0, 12 * scale);
+        }
+        ImGui.BeginGroup();
         Ui.Label("NOW PLAYING");
         if (player.Current is { } t)
         {
-            ImGui.TextUnformatted(t.Title);
-            ImGui.TextDisabled("Requested by");
+            using (plugin.TitleFont.Push()) ImGui.TextUnformatted(t.Title);
+            ImGui.TextDisabled("from");
             ImGui.SameLine();
             Ui.SenderCell(plugin, t.Request.Sender, "np");
             if (player.CurrentIsShared)
+            {
+                ImGui.SameLine();
                 ImGui.TextColored(Theme.Accent, plugin.Sharer.UsesMusicMod
-                    ? $"Playing through the music mod for Lightless pairs ({plugin.Sharer.Emote.Command})"
-                    : $"Playing for Lightless pairs via {plugin.Sharer.Emote.Command}");
+                    ? $"· via the music mod ({plugin.Sharer.Emote.Command})"
+                    : $"· shared via {plugin.Sharer.Emote.Command}");
+            }
         }
         else if (player.WaitingForSync)
         {
-            ImGui.TextUnformatted("Syncing through Lightless...");
+            using (plugin.TitleFont.Push()) ImGui.TextUnformatted("Syncing through Lightless...");
             ImGui.TextDisabled($"Starts in a few seconds so your pairs can download it. ({plugin.Sharer.Status})");
         }
         else
         {
-            ImGui.TextUnformatted(player.Downloading != null ? "Downloading..." : "Nothing playing");
-            ImGui.TextDisabled(player.Downloading != null ? $"from {player.Downloading.Sender}" : "Waiting for requests.");
+            using (plugin.TitleFont.Push()) ImGui.TextUnformatted(player.Downloading != null ? "Downloading..." : "Nothing playing");
+            ImGui.TextDisabled(player.Downloading != null ? $"{player.Downloading.Display} · from {player.Downloading.Sender}" : "Waiting for requests.");
         }
 
         ImGui.Spacing();
-        var width = ImGui.GetContentRegionAvail().X - 10 * ImGuiHelpers.GlobalScale;
+        var width = ImGui.GetContentRegionAvail().X - 10 * scale;
         controls.DrawSeekBar(width);
         controls.DrawButtons();
         ImGui.SameLine();
         ImGui.Dummy(new Vector2(12, 0));
         ImGui.SameLine();
-        controls.DrawVolume(Math.Min(220 * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight() * 2));
+        controls.DrawVolume(Math.Min(220 * scale, ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight() * 2 - 10 * scale));
+        ImGui.EndGroup();
         Ui.EndCard();
 
         // Approvals card (only when someone waits)
@@ -242,9 +330,15 @@ public sealed class MainWindow : Window
 
         // Up next card
         Ui.BeginCard();
-        Ui.Label("UP NEXT");
         var queue = player.FullQueue();
         var (_, ready) = player.UpNext;
+        Ui.Label("UP NEXT");
+        if (queue.Length > 0)
+        {
+            var summary = $"{queue.Length} song{(queue.Length == 1 ? "" : "s")}{TotalLength(queue.Select(q => q.Request))}";
+            ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(summary).X - 10 * scale);
+            ImGui.TextDisabled(summary);
+        }
         if (queue.Length == 0)
         {
             ImGui.TextDisabled("Nothing queued.");
@@ -257,9 +351,20 @@ public sealed class MainWindow : Window
                 ImGui.PushID($"next{r.Id}");
                 ImGui.TextColored(isNext ? Theme.Accent : Theme.Muted, $"{i + 1}.");
                 ImGui.SameLine();
-                ImGui.TextUnformatted(r.Display);
-                ImGui.SameLine();
-                ImGui.TextDisabled(isNext ? $"· {r.Sender} · {(ready ? "ready" : "getting it ready...")}" : $"· {r.Sender}");
+                var right = string.Join(" · ", new[] { Ui.Length(r.KnownSeconds), isNext ? (ready ? "ready" : "getting it ready...") : "" }
+                    .Where(s => s.Length > 0));
+                var info = $" · {r.Sender}";
+                var rightW = right.Length > 0 ? ImGui.CalcTextSize(right).X + 16 * scale : 0;
+                var nameW = ImGui.GetContentRegionAvail().X - rightW - ImGui.CalcTextSize(info).X - 10 * scale;
+                ImGui.TextUnformatted(Ui.Ellipsize(r.Display, Math.Max(nameW, 60 * scale)));
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(r.Display);
+                ImGui.SameLine(0, 0);
+                ImGui.TextDisabled(info);
+                if (right.Length > 0)
+                {
+                    ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(right).X - 10 * scale);
+                    ImGui.TextDisabled(right);
+                }
                 ImGui.PopID();
             }
             if (queue.Length > 3)
@@ -273,6 +378,16 @@ public sealed class MainWindow : Window
         Ui.BeginCard();
         DrawAddLink("player");
         Ui.EndCard();
+    }
+
+    /// <summary>" · about 38 min of music", or " · 30+ min of music" while some lengths aren't known yet.</summary>
+    private static string TotalLength(IEnumerable<SongRequest> songs)
+    {
+        var list = songs.ToList();
+        var known = list.Where(r => r.KnownSeconds is > 0).Sum(r => r.KnownSeconds!.Value);
+        if (known == 0) return "";
+        if (list.All(r => r.KnownSeconds is > 0)) return $" · {Ui.About(known)} of music";
+        return $" · {Math.Max(1, known / 60)}+ min of music";
     }
 
     private string lastSubmitted = string.Empty;
@@ -331,32 +446,87 @@ public sealed class MainWindow : Window
         ImGui.PopTextWrapPos();
         ImGui.Spacing();
 
-        // Setup checklist
+        // Step-by-step setup
         Ui.BeginCard();
-        Ui.Label("SETUP CHECKLIST");
-        Check("Penumbra is installed", sharer.PenumbraAvailable, "Needed to put the song on your character.");
-        Check("Lightless Sync is installed", sharer.LightlessLoaded, "Needed to send it to other players.");
-        Check("Sharing is on", cfg.ShareViaLightless, "The switch below. Off = songs play only for you.");
+        Ui.Label("SHARING SETUP");
+        ImGui.Spacing();
+
+        // 1. Plugins
+        var plugins = sharer.PenumbraAvailable && sharer.LightlessLoaded;
+        Step(plugins ? StepState.Done : StepState.Failed, "Penumbra and Lightless Sync",
+            plugins ? "Both are running."
+            : !sharer.PenumbraAvailable && !sharer.LightlessLoaded ? "Install both: Penumbra puts the song on your character, Lightless sends it to your pairs."
+            : !sharer.PenumbraAvailable ? "Penumbra isn't running. It puts the song on your character."
+            : "Lightless Sync isn't running. It sends the song to your pairs.");
+
+        // 2. The switch
+        var share = cfg.ShareViaLightless;
+        Step(share ? StepState.Done : StepState.Todo, "Sharing is on", share ? "Songs go out to nearby Lightless pairs." : "Off: songs play only for you.");
+        StepBody(() =>
+        {
+            if (ImGui.Checkbox("Share songs with nearby Lightless pairs", ref share)) { cfg.ShareViaLightless = share; changed = true; }
+            Ui.Help("Off = songs play only for you. Also: /tundy share");
+        });
+
+        // 3. What plays it
+        var owned = sharer.EmoteOwned();
         if (sharer.UsesMusicMod)
         {
             var problems = plugin.Music.SetupProblems();
-            Check(problems.Count == 0 ? "The music mod is set up" : $"The music mod: {problems[0]}", problems.Count == 0,
-                "See \"Music mod\" below. The button there can set it up for you.");
-            Check(plugin.Ffmpeg.CurrentPath != null ? "ffmpeg is installed" : "ffmpeg isn't installed yet", plugin.Ffmpeg.CurrentPath != null,
-                "Converts songs to the music mod's format. It downloads with the first song, or in Settings → Download tools.");
+            var ffmpeg = plugin.Ffmpeg.CurrentPath != null;
+            var detail = problems.Count > 0 ? problems[0]
+                : !ffmpeg ? (plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : "ffmpeg isn't installed yet: it converts songs for the music mod (about 120 MB, once).")
+                : owned == false ? $"Your character hasn't learned {sharer.Emote.Command}, the emote the music mod's dance is on."
+                : $"\"{cfg.QueueTargetMod}\" plays the songs through its dance on {sharer.Emote.Command}.";
+            var ok = problems.Count == 0 && ffmpeg && owned != false;
+            Step(ok ? StepState.Done : StepState.Failed, plugin.Music.IsRecommended ? "Mega Music Mod set up" : "Music mod set up", detail);
+            if (!ok)
+            {
+                StepBody(() =>
+                {
+                    if (problems.Count > 0 && plugin.Music.IsRecommended && plugin.Music.State().Installed && ImGui.Button("Set it up for me"))
+                        megaSetupResult = plugin.Music.SetUp();
+                    else if (problems.Count == 0 && !ffmpeg && !plugin.Ffmpeg.Downloading && ImGui.Button("Install ffmpeg"))
+                        _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { });
+                    else if ((problems.Count > 0 || owned == false) && ImGui.Button("Show the music mod settings"))
+                        openHowItPlays = true;
+                    if (megaSetupResult.Length > 0) ImGui.TextDisabled(megaSetupResult);
+                });
+            }
         }
-        var tested = sharer.LastCheck != "No song shared yet.";
-        Check(!tested ? "Not tested yet: it's checked when the next song starts" : sharer.LastCheckOk ? "The last song played for your character" : "The last song didn't play for your character",
-            tested && sharer.LastCheckOk, tested ? sharer.LastCheck : "Tundy checks each song as it starts.", warnOnly: !tested);
-        Ui.EndCard();
+        else
+        {
+            var ok = owned != false;
+            Step(ok ? StepState.Done : StepState.Failed, $"Emote: {sharer.Emote.Name} ({sharer.Emote.Command})",
+                ok ? "Its sound is replaced by the song while one is shared." : $"Your character hasn't learned {sharer.Emote.Command}. Pick another emote under \"How it plays\".");
+            if (!ok) StepBody(() => { if (ImGui.Button("Pick another emote")) openHowItPlays = true; });
+        }
 
-        var share = cfg.ShareViaLightless;
-        if (ImGui.Checkbox("Share songs with nearby Lightless pairs", ref share)) { cfg.ShareViaLightless = share; changed = true; }
-        Ui.Help("Off = songs play only for you. Also: /tundy share");
+        // 4. Test
+        var canTest = share && sharer.PenumbraAvailable && plugin.Player.Current == null && !plugin.Player.WaitingForSync && !sharer.Testing;
+        Step(sharer.Testing ? StepState.Todo : !sharer.HasChecked ? StepState.Todo : sharer.LastCheckOk ? StepState.Done : StepState.Failed,
+            "Test it",
+            sharer.Testing ? "Testing..." : sharer.HasChecked ? sharer.LastCheck
+            : "Does the emote once and checks that the game loads Tundy's sound for your character, which is what Lightless sends. "
+              + "Each song is also checked when it starts.");
+        StepBody(() =>
+        {
+            if (!canTest) ImGui.BeginDisabled();
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Test now")) _ = sharer.TestAsync();
+            if (!canTest) ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(!share ? "Turn sharing on first."
+                    : plugin.Player.Current != null || plugin.Player.WaitingForSync ? "Works while no song is playing."
+                    : "Your character does the emote (quietly, no chat message). The first time, this also teaches Lightless the sound file, so the first song starts sooner.");
+        });
+        Ui.EndCard();
 
         if (!share) ImGui.BeginDisabled();
 
-        ImGui.Spacing();
+        if (openHowItPlays) ImGui.SetNextItemOpen(true);
+        openHowItPlays = false;
+        if (Ui.Group("How it plays"))
+        {
         ImGui.TextUnformatted("How the song plays in game:");
         var target = cfg.ShareTarget;
         if (ImGui.RadioButton("Through a music mod's DJ dance (recommended, like SoundyQ)", ref target, 0)) { cfg.ShareTarget = 0; changed = true; }
@@ -383,8 +553,10 @@ public sealed class MainWindow : Window
             Ui.Help("Quiet: Tundy keeps silence on the song slot between requests. The music mod's song: what you picked in "
                     + "the mod (for example a song added in the Import tab) plays whenever you dance. Applies after the next song.");
         }
+        }
 
-        Ui.Section("Starting songs");
+        if (Ui.Group("Starting songs"))
+        {
         var auto = cfg.ShareAutoEmote;
         if (ImGui.Checkbox("Do the emote automatically when a song starts", ref auto)) { cfg.ShareAutoEmote = auto; changed = true; }
         Ui.Help("Off = do the emote yourself (or click the button below) when you want people to hear it.");
@@ -416,19 +588,17 @@ public sealed class MainWindow : Window
                 : "ffmpeg isn't installed yet: the music mod needs it. It downloads with the first song, or in Settings → Download tools.");
 
         ImGui.Spacing();
-        if (ImGui.Button($"Do {current.Command} now"))
+        if (ImGui.Button($"Do {sharer.Emote.Command} now"))
             _ = sharer.PerformEmoteAsync();
         Ui.Tooltip("Plays the shared song again for people nearby. Also useful the very first time, so Lightless learns the sound file.");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Status: {sharer.Status}");
+        }
 
         if (!share) ImGui.EndDisabled();
 
-        ImGui.Spacing();
-        ImGui.TextDisabled($"Status: {sharer.Status}");
-        ImGui.PushTextWrapPos();
-        ImGui.TextColored(sharer.LastCheckOk ? Theme.Good : Theme.Warn, $"Last check: {sharer.LastCheck}");
-        ImGui.PopTextWrapPos();
-
-        Ui.Section("Good to know");
+        if (Ui.Group("Good to know"))
+        {
         ImGui.PushTextWrapPos();
         ImGui.BulletText("Only people paired with you in Lightless (directly or in a Syncshell) and close to you can hear it.");
         ImGui.BulletText("The first time you share with an emote, your character does it once with its normal sound (about 10 seconds early) so Lightless learns it. After that, songs start sooner.");
@@ -440,6 +610,7 @@ public sealed class MainWindow : Window
         ImGui.BulletText("Seeking is off while sharing. Skip and stop work, and stop the in-game copy for you. Others may hear the end of it.");
         ImGui.BulletText("The sound comes from your character, so it gets quieter as people walk away.");
         ImGui.PopTextWrapPos();
+        }
 
         if (changed) plugin.SaveConfig();
     }
@@ -580,16 +751,43 @@ public sealed class MainWindow : Window
         return changed;
     }
 
-    private static void Check(string text, bool ok, string why, bool warnOnly = false)
+    private bool openHowItPlays;
+
+    private void OpenHowItPlays()
     {
-        var color = ok ? Theme.Good : warnOnly ? Theme.Muted : Theme.Bad;
+        page = Page.Sharing;
+        openHowItPlays = true;
+    }
+
+    private enum StepState { Done, Todo, Failed }
+
+    /// <summary>One setup step: a tick, circle or cross, its name, and a line under it saying where it stands.</summary>
+    private static void Step(StepState state, string title, string detail)
+    {
+        var (color, icon) = state switch
+        {
+            StepState.Done => (Theme.Good, FontAwesomeIcon.CheckCircle),
+            StepState.Failed => (Theme.Bad, FontAwesomeIcon.TimesCircle),
+            _ => (Theme.Warn, FontAwesomeIcon.Circle),
+        };
+        ImGui.Spacing();
         ImGui.PushFont(UiBuilder.IconFont);
-        ImGui.TextColored(color, (ok ? FontAwesomeIcon.CheckCircle : warnOnly ? FontAwesomeIcon.Clock : FontAwesomeIcon.TimesCircle).ToIconString());
+        ImGui.TextColored(color, icon.ToIconString());
         ImGui.PopFont();
-        Ui.Tooltip(why);
         ImGui.SameLine();
-        ImGui.TextUnformatted(text);
-        Ui.Tooltip(why);
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted(title);
+        ImGui.TextColored(Theme.Muted, detail);
+        ImGui.EndGroup();
+    }
+
+    /// <summary>Controls that belong to the step above, lined up under its text.</summary>
+    private static void StepBody(Action draw)
+    {
+        var indent = ImGui.GetFrameHeight();
+        ImGui.Indent(indent);
+        draw();
+        ImGui.Unindent(indent);
     }
 
     // ------------------------------------------------------------------ Queue
@@ -608,7 +806,7 @@ public sealed class MainWindow : Window
             && ImGui.GetIO().KeyCtrl)
             player.ClearQueue();
         ImGui.SameLine();
-        ImGui.TextDisabled($"{player.PendingCount} waiting · limit {plugin.Config.MaxQueueLength} for tell requests");
+        ImGui.TextDisabled($"{player.PendingCount} waiting{TotalLength(queue.Select(q => q.Request))} · limit {plugin.Config.MaxQueueLength} for tell requests");
 
         var rowH = ImGui.GetFrameHeight();
         var actionsW = (rowH + ImGui.GetStyle().ItemSpacing.X) * 4;
@@ -639,12 +837,16 @@ public sealed class MainWindow : Window
                 else ImGui.TextDisabled((i + 1).ToString());
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(r.Display);
-                if (isNext)
+                var hover = ImGui.IsItemHovered();
+                var extra = string.Join(" · ", new[] { Ui.Length(r.KnownSeconds), isNext ? (ready ? "ready" : "getting it ready...") : "" }
+                    .Where(s => s.Length > 0));
+                if (extra.Length > 0)
                 {
                     ImGui.SameLine();
-                    ImGui.TextDisabled(ready ? "(ready)" : "(getting it ready...)");
+                    ImGui.TextDisabled(extra);
+                    hover |= ImGui.IsItemHovered();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{r.Url}\nRequested {Ui.Ago(r.RequestedAt)}"
+                if (hover) ImGui.SetTooltip($"{r.Url}\nRequested {Ui.Ago(r.RequestedAt)}"
                     + (isNext ? "\nDownloaded and converted early so it starts right after the current song. "
                                 + "Moving it (or another song above it) prepares the new first song instead." : ""));
                 ImGui.TableNextColumn();
@@ -734,6 +936,11 @@ public sealed class MainWindow : Window
                 ImGui.TextUnformatted(p.Display);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(p.Url + "\nClick to copy the link");
                 if (ImGui.IsItemClicked()) ImGui.SetClipboardText(p.Url);
+                if (p.Seconds is > 0)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"· {Ui.Length(p.Seconds)}");
+                }
                 ImGui.TableNextColumn();
                 Ui.SenderCell(plugin, p.Sender, "s");
                 ImGui.TableNextColumn();
@@ -1060,6 +1267,9 @@ public sealed class MainWindow : Window
             var pastel = cfg.PastelTheme;
             if (ImGui.Checkbox("Pastel purple theme", ref pastel)) { cfg.PastelTheme = pastel; changed = true; }
             Ui.Help("Off = Dalamud's normal look. Only Tundy's windows change.");
+            var covers = cfg.ShowCoverArt;
+            if (ImGui.Checkbox("Show song covers", ref covers)) { cfg.ShowCoverArt = covers; changed = true; }
+            Ui.Help("The song's YouTube thumbnail, loaded from YouTube's image server (i.ytimg.com) for the song that's playing.");
         }
 
         if (Ui.Group("Requests", true))
@@ -1092,6 +1302,45 @@ public sealed class MainWindow : Window
         Ui.Help("How long one person has to wait between playlist requests (also with shuffle commands), on top of the cooldown above. "
                 + "With replies on, they're told how long is left. Playlists you add yourself or approve don't count.");
 
+        }
+
+        if (Ui.Group("Song as your title (Honorific)"))
+        {
+            var hon = plugin.Honorific;
+            var available = hon.Available;
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(available ? Theme.Good : Theme.Warn, available ? "Honorific is installed." : "Honorific isn't installed (or isn't on).");
+            ImGui.PopTextWrapPos();
+
+            var on = cfg.HonorificTitle;
+            if (ImGui.Checkbox("Show the song that's playing as my title", ref on)) { cfg.HonorificTitle = on; changed = true; }
+            Ui.Help("Your title becomes the song while it plays. When the music stops, your own Honorific title comes back; "
+                    + "Honorific's settings aren't changed. Lightless pairs who also have Honorific see it too, a few seconds later.");
+            if (!on) ImGui.BeginDisabled();
+            var artist = cfg.HonorificWithArtist;
+            if (ImGui.Checkbox("Include the artist", ref artist)) { cfg.HonorificWithArtist = artist; changed = true; }
+            Ui.Help("Titles can be at most 32 characters, so longer names are cut short. Just the song's name fits more often.");
+            var above = cfg.HonorificAbove;
+            if (ImGui.Checkbox("Above my name", ref above)) { cfg.HonorificAbove = above; changed = true; }
+            var onlyShared = cfg.HonorificOnlyWhenSharing;
+            if (ImGui.Checkbox("Only while the song is shared with Lightless pairs", ref onlyShared)) { cfg.HonorificOnlyWhenSharing = onlyShared; changed = true; }
+            Ui.Help("Off: also when the song plays only for you.");
+
+            var useColor = cfg.HonorificUseColor;
+            if (ImGui.Checkbox("Color##hcol", ref useColor)) { cfg.HonorificUseColor = useColor; changed = true; }
+            ImGui.SameLine();
+            var color = cfg.HonorificColor;
+            if (ImGui.ColorEdit3("##hcolor", ref color, ImGuiColorEditFlags.NoInputs)) { cfg.HonorificColor = color; changed = true; }
+            ImGui.SameLine(0, 18 * ImGuiHelpers.GlobalScale);
+            var useGlow = cfg.HonorificUseGlow;
+            if (ImGui.Checkbox("Glow##hglow", ref useGlow)) { cfg.HonorificUseGlow = useGlow; changed = true; }
+            ImGui.SameLine();
+            var glow = cfg.HonorificGlow;
+            if (ImGui.ColorEdit3("##hglowc", ref glow, ImGuiColorEditFlags.NoInputs)) { cfg.HonorificGlow = glow; changed = true; }
+
+            ImGui.TextDisabled($"Preview: 《{hon.Format(plugin.Player.Current?.Title ?? "Kid Francescoli - Moon (And It Went Like)")}》");
+            if (hon.Status.Length > 0) ImGui.TextDisabled(hon.Status);
+            if (!on) ImGui.EndDisabled();
         }
 
         if (Ui.Group("Announce songs in chat"))
@@ -1225,6 +1474,9 @@ public sealed class MainWindow : Window
         if (ImGui.Checkbox("Show the \"Now playing\" window (song name and time)", ref showMini)) plugin.SetMiniPlayer(showMini);
         var lockMini = cfg.LockMiniPlayer;
         if (ImGui.Checkbox("Lock its position", ref lockMini)) { cfg.LockMiniPlayer = lockMini; changed = true; }
+        var compact = cfg.CompactMiniPlayer;
+        if (ImGui.Checkbox("Compact (cover, name, time bar and the next song)", ref compact)) { cfg.CompactMiniPlayer = compact; changed = true; }
+        Ui.Help("Also: right-click the window.");
 
         }
 

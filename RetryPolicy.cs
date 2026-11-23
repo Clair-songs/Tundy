@@ -26,6 +26,15 @@ public static partial class RetryPolicy
         return !Permanent.Any(e.Contains);
     }
 
+    /// <summary>YouTube refused the connection (HTTP 403 Forbidden or 503), which trying over IPv4 often fixes.</summary>
+    public static bool IsBlockedByYouTube(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return false;
+        var e = error.ToLowerInvariant();
+        return e.Contains("http error 403") || e.Contains("http error 503") || e.Contains("403: forbidden")
+               || e.Contains("503: service unavailable");
+    }
+
     /// <summary>A short reason to show in chat (first line, trimmed of yt-dlp's "ERROR: [youtube] id:" prefix).</summary>
     public static string Short(string? error)
     {

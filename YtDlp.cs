@@ -21,7 +21,7 @@ public sealed record YouTubeResult(string Id, string Title, int? Seconds, string
 }
 
 /// <summary>A downloaded song: the file, the raw video title, and YouTube's artist/track fields when it has them.</summary>
-public sealed record SongDownload(string File, string Title, string? Artist, string? Track)
+public sealed record SongDownload(string File, string Title, string? Artist, string? Track, int? Seconds = null)
 {
     /// <summary>The name to show: "Artist - Track" when YouTube knows them, otherwise the cleaned-up video title.</summary>
     public string DisplayTitle => TitleCleaner.Display(Title, Artist, Track);
@@ -62,6 +62,12 @@ public sealed class YtDlp
     }
 
     public bool IsInstalled => File.Exists(ExePath);
+
+    /// <summary>
+    /// Connect to YouTube over IPv4 only (yt-dlp's -4). Turned on for the rest of the session after YouTube answers
+    /// a download with HTTP 403 or 503, which often happens over IPv6 (YouTube blocks some IPv6 address ranges).
+    /// </summary>
+    public bool ForceIpv4 { get; set; }
 
     /// <summary>
     /// The JavaScript runtime yt-dlp uses to get past YouTube's download checks (deno), or null if none is there yet.
@@ -155,7 +161,7 @@ public sealed class YtDlp
             "--match-filter", $"duration <= {maxDurationSeconds} & !is_live",
             "-f", "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio",
             "-o", template,
-            "--print", "after_move:%(title)s\t%(artist)s\t%(track)s",
+            "--print", "after_move:%(title)s\t%(artist)s\t%(track)s\t%(duration)s",
             "--print", "after_move:filepath",
             "--", url,
         };
@@ -168,6 +174,15 @@ public sealed class YtDlp
             var reason = stderr.Trim();
             if (string.IsNullOrEmpty(reason) && lines.Length == 0)
                 reason = $"Video rejected (live stream, or longer than {maxDurationSeconds}s).";
+
+            // YouTube often refuses IPv6 connections with 403/503. Try again right away over IPv4, and keep using
+            // IPv4 for the rest of the session.
+            if (!ForceIpv4 && RetryPolicy.IsBlockedByYouTube(reason))
+            {
+                ForceIpv4 = true;
+                Plugin.Log.Warning($"YouTube refused the download of {url} ({RetryPolicy.Short(reason)}). Trying again over IPv4.");
+                return await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem);
+            }
             throw new InvalidOperationException(reason.Length > 300 ? reason[..300] : reason);
         }
 
@@ -175,8 +190,8 @@ public sealed class YtDlp
         if (!File.Exists(file))
             throw new FileNotFoundException("yt-dlp reported a file that does not exist.", file);
 
-        var (title, artist, track) = ParseInfo(lines[^2]);
-        return new SongDownload(file, title, artist, track);
+        var (title, artist, track, seconds) = ParseInfo(lines[^2]);
+        return new SongDownload(file, title, artist, track, seconds);
     }
 
     /// <summary>A video's title and YouTube's artist/track fields, without downloading. Null if it can't be read.</summary>
@@ -186,20 +201,26 @@ public sealed class YtDlp
         var (exit, stdout, _) = await RunAsync(new[]
         {
             "--no-playlist", "--no-warnings", "--skip-download",
-            "--print", "%(title)s\t%(artist)s\t%(track)s",
+            "--print", "%(title)s\t%(artist)s\t%(track)s\t%(duration)s",
             "--", url,
         }, ct);
         var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
         if (exit != 0 || string.IsNullOrWhiteSpace(line)) return null;
-        var (title, artist, track) = ParseInfo(line);
-        return new SongDownload("", title, artist, track);
+        var (title, artist, track, seconds) = ParseInfo(line);
+        return new SongDownload("", title, artist, track, seconds);
     }
 
-    private static (string Title, string? Artist, string? Track) ParseInfo(string line)
+    /// <summary>"title \t artist \t track \t duration" (as printed above) -> its parts; "NA" means unknown.</summary>
+    private static (string Title, string? Artist, string? Track, int? Seconds) ParseInfo(string line)
     {
         static string? Field(string s) => s is "NA" or "" ? null : s.Trim();
         var p = line.Split('\t');
-        return p.Length >= 3 ? (p[0], Field(p[1]), Field(p[2])) : (line, null, null);
+        if (p.Length < 3) return (line, null, null, null);
+        int? seconds = p.Length >= 4 && double.TryParse(p[^1], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? (int)Math.Round(d) : null;
+        // A title with a tab in it: everything before the last 3 fields is the title.
+        var titleParts = p.Length >= 4 ? p.Length - 3 : 1;
+        return (string.Join('\t', p.Take(titleParts)), Field(p[titleParts]), Field(p[titleParts + 1]), seconds);
     }
 
     /// <summary>Quick YouTube search (no video pages opened): id, title, length and channel of the top results.</summary>
@@ -280,6 +301,8 @@ public sealed class YtDlp
             psi.ArgumentList.Add("--js-runtimes");
             psi.ArgumentList.Add($"deno:{deno}");
         }
+        if (ForceIpv4 && args.FirstOrDefault() != "-U")
+            psi.ArgumentList.Add("--force-ipv4");
         foreach (var a in args)
             psi.ArgumentList.Add(a); // ArgumentList escapes each argument: no shell injection from chat text.
 

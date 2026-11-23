@@ -21,6 +21,9 @@ public sealed class PendingRequest
     /// <summary>Song or playlist name, looked up in the background. Null until it's known.</summary>
     public string? Title { get; set; }
 
+    /// <summary>The song's length in seconds, once it's looked up.</summary>
+    public int? Seconds { get; set; }
+
     public string Display => Title ?? (Playlist != null ? $"Playlist: {Url}" : Url);
 }
 

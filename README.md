@@ -184,19 +184,36 @@ Send a playlist like a song: `!q <playlist link>`.
 - Recent songs are kept (Settings, default 500 MB) so repeats and History replays start instantly.
 - Failed downloads are retried automatically for temporary problems (network, HTTP 403, bot checks, timeouts), with
   a yt-dlp update before the last try. Songs that can never play (private, age-restricted, too long, live...) aren't.
+- When YouTube refuses a download with HTTP 403 or 503 (it often does over IPv6), Tundy tries again right away over
+  IPv4 and keeps using IPv4 for the rest of the session.
+
+## Song as your title (Honorific)
+With the [Honorific](https://github.com/Caraxi/Honorific) plugin installed, Settings → Song as your title can show the
+song that's playing as your character's title (《♪ Innerbloom》), with or without the artist, above or below your name,
+in a color and glow you pick. It's off by default. Honorific titles can be at most 32 characters, so long names are
+cut short. When the music stops (3 seconds after the last song, so it doesn't flicker between songs) your own
+Honorific title comes back; Honorific's settings are never changed and nothing is saved. Lightless pairs who also have
+Honorific see it a few seconds later. By default it only shows while the song is shared with them.
 
 ## In-game control panel (`/tundy`)
 Pastel purple look, with a switch back to Dalamud's normal look in Settings → Look.
+- **Problems banner**: shows only when something's wrong, with a button that fixes it or opens where to fix it: TellTunes
+  or SoundyQ also on (SoundyQ also counts when it holds the music mod's song slot, which beats Tundy's even with
+  different request commands), Penumbra not running, the music mod not set up, ffmpeg missing, the emote not learned,
+  or the last song didn't play for others.
 - **Top**: pills for accepting/paused requests, who can request, how songs are shared, and requests to approve. Click one to open its settings.
-- **Now playing**: the song, who sent it, a seek bar, skip/stop and volume; requests waiting for your approval; the next 3 songs; and a box to paste a link yourself.
+- **Now playing**: the song's cover (its YouTube thumbnail, can be turned off in Settings → Look) and name, who sent it, a seek bar, skip/stop and volume; requests waiting for your approval, with song lengths; the next 3 songs with their lengths and how much music is queued; and a box to paste a link yourself.
 - **Queue**: play now, move up/down, remove, shuffle, clear (hold Ctrl), plus **History** (play again, re-queue, copy the link) and the **Requests log** (every request tell and what happened to it) as sections you can open.
 - **People**: request and shuffle commands, who can request, and per-player settings.
-- **Sharing**: a setup checklist, music mod or emote, music mod setup, timing and file size.
+- **Sharing**: setup in steps (Penumbra and Lightless, sharing on, the music mod or emote, then **Test now**, which does
+  the emote once and checks the game loads Tundy's sound for your character), then sections for how it plays, starting
+  songs and good-to-know notes.
 - **Import**: add songs to mods, and the sound replacer.
-- **Settings** (groups you can open and close): look, requests and cooldowns, announcements, skipping, replies, retries, playlists, playback, the Now playing window, download tools, clean up.
+- **Settings** (groups you can open and close): look (theme, covers), requests and cooldowns, the Honorific title, announcements, skipping, replies, retries, playlists, playback, the Now playing window, download tools, clean up.
 
 **Now playing window** (`/tundy mini`, or the window button at the top right of the panel): the song's name, a
-progress bar with elapsed / total time, skip and panel buttons, and who sent it.
+progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing
+window, or right-click the window): cover, name, a thin time bar, skip and the next song, without a title bar.
 
 Chat commands: `/tundy mini | play <link> | skip | stop | approve [all] | import | on | off | share | mute | vol 0-100`
 

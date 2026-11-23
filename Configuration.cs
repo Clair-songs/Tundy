@@ -30,6 +30,31 @@ public class Configuration : IPluginConfiguration
     /// <summary>Pastel purple look for Tundy's windows. Off = Dalamud's normal look.</summary>
     public bool PastelTheme { get; set; } = true;
 
+    /// <summary>Show the song's cover (its YouTube thumbnail) in the player.</summary>
+    public bool ShowCoverArt { get; set; } = true;
+
+    /// <summary>Smaller "Now playing" window: cover, name, time bar and the next song.</summary>
+    public bool CompactMiniPlayer { get; set; }
+
+    // ---- Honorific title ----
+
+    /// <summary>Show the song that's playing as your character's title through the Honorific plugin.</summary>
+    public bool HonorificTitle { get; set; }
+
+    /// <summary>"Artist - Song" instead of just the song's name.</summary>
+    public bool HonorificWithArtist { get; set; }
+
+    /// <summary>Above your name (Honorific's "prefix"), otherwise below it.</summary>
+    public bool HonorificAbove { get; set; }
+
+    /// <summary>Only while the song is shared with Lightless pairs (so the title matches what they hear).</summary>
+    public bool HonorificOnlyWhenSharing { get; set; } = true;
+
+    public bool HonorificUseColor { get; set; } = true;
+    public System.Numerics.Vector3 HonorificColor { get; set; } = new(0.776f, 0.710f, 0.969f); // lavender
+    public bool HonorificUseGlow { get; set; }
+    public System.Numerics.Vector3 HonorificGlow { get; set; } = new(0.357f, 0.282f, 0.569f);
+
     /// <summary>Silence playback without losing the volume setting.</summary>
     public bool Muted { get; set; } = false;
 
