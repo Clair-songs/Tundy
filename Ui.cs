@@ -127,6 +127,18 @@ public static class Ui
         ImGui.Spacing();
     }
 
+    /// <summary>
+    /// Text on the current line, pushed against the right edge (minus <paramref name="margin"/>). Never wraps:
+    /// inside a card the wrap point is right there, so it would otherwise break into one piece per line.
+    /// </summary>
+    public static void TextRight(string text, Vector4 color, float margin)
+    {
+        ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(text).X - margin);
+        ImGui.PushTextWrapPos(-1f);
+        ImGui.TextColored(color, text);
+        ImGui.PopTextWrapPos();
+    }
+
     /// <summary>"3:45", or "" when unknown.</summary>
     public static string Length(int? seconds) => seconds is > 0 ? Time(seconds.Value) : "";
 

@@ -191,9 +191,12 @@ Send a playlist like a song: `!q <playlist link>`.
 
 ## Song as your title (Honorific)
 With the [Honorific](https://github.com/Caraxi/Honorific) plugin installed, Settings → Song as your title can show the
-song that's playing as your character's title (《♪ Innerbloom》), with or without the artist, above or below your name,
+song that's playing as your character's title: just the song's name (《♪ Innerbloom》), the song's name then the artist
+(《♪ Innerbloom · RÜFÜS DU SOL》), or the two taking turns (every 15 seconds; 5 to 60 in Settings) (《♪ Innerbloom》, then
+《by RÜFÜS DU SOL》). It goes above or below your name,
 in a color and glow you pick. It's off by default. Honorific titles can be at most 32 characters, so long names are
-cut short. When the music stops (3 seconds after the last song, so it doesn't flicker between songs) your own
+cut short (taking turns gives each one the full 32). Your pairs may see the turns later or skip one, since Honorific
+passes title changes on at most every 5 seconds. When the music stops (3 seconds after the last song, so it doesn't flicker between songs) your own
 Honorific title comes back; Honorific's settings are never changed and nothing is saved. Lightless pairs who also have
 Honorific see it a few seconds later. By default it only shows while the song is shared with them.
 

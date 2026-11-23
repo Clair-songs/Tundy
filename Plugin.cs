@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -111,7 +111,8 @@ public sealed partial class Plugin : IDalamudPlugin
     public Plugin()
     {
         Config = SettingsImporter.LoadOrImport(PluginInterface, out var importNotes);
-        Migrate();
+        LoadPlaylistCooldowns();
+        Migrate(); // also saves
 
         var dir = PluginInterface.GetPluginConfigDirectory();
         YtDlp = new YtDlp(Path.Combine(dir, "bin"), () => Config.YtDlpPath);
@@ -245,6 +246,20 @@ public sealed partial class Plugin : IDalamudPlugin
         Config.ImportRoutes = Distinct(Config.ImportRoutes);
         if (Config.QueueAliases.Count == 0) Config.QueueAliases.Add("!q");
         if (Config.QueueScdRoutes.Count == 0) Config.QueueScdRoutes.Add(MegaMusicMod.RecommendedRoute);
+
+        if (Config.Version < 6)
+        {
+            // v6: the Honorific title swaps every 15 seconds by default (a test build saved 5).
+            if (Config.HonorificSwapSeconds == 5) Config.HonorificSwapSeconds = 15;
+            Config.Version = 6;
+        }
+
+        // 0.4.3: "Include the artist" became one of the choices for what the Honorific title shows.
+        if (Config.HonorificWithArtist)
+        {
+            Config.HonorificShow = HonorificTitle.ShowSongThenArtist;
+            Config.HonorificWithArtist = false;
+        }
         SaveConfig();
     }
 
@@ -592,6 +607,25 @@ public sealed partial class Plugin : IDalamudPlugin
         return left > TimeSpan.Zero ? left : null;
     }
 
+    /// <summary>Starts this person's playlist cooldown, saved so it still counts after Tundy reloads.</summary>
+    private void RememberPlaylist(string sender, DateTime utc)
+    {
+        lastPlaylist[sender] = utc;
+        Config.LastPlaylistRequests[sender] = utc;
+        SaveConfig();
+    }
+
+    /// <summary>Loads the saved playlist cooldowns that haven't run out yet, and forgets the rest.</summary>
+    private void LoadPlaylistCooldowns()
+    {
+        var keep = TimeSpan.FromSeconds(Math.Max(0, Config.PlaylistCooldownSeconds));
+        foreach (var (name, at) in Config.LastPlaylistRequests.ToList())
+        {
+            if (DateTime.UtcNow - at < keep) lastPlaylist[name] = at;
+            else Config.LastPlaylistRequests.Remove(name);
+        }
+    }
+
     private static string Wait(TimeSpan t) =>
         t.TotalSeconds < 60 ? $"{Math.Ceiling(t.TotalSeconds)} seconds"
         : Math.Ceiling(t.TotalMinutes) is var m && m == 1 ? "1 minute" : $"{Math.Ceiling(t.TotalMinutes)} minutes";
@@ -730,7 +764,7 @@ public sealed partial class Plugin : IDalamudPlugin
                         Replier.Send(encodedSender, sender, $"You can send another playlist in {Wait(wait)}.");
                         return;
                     }
-                    if (sender != "You") lastPlaylist[sender] = DateTime.UtcNow;
+                    if (sender != "You") RememberPlaylist(sender, DateTime.UtcNow);
                     HandlePlaylist(encodedSender, sender, link, replyStart, shuffle);
                 }
                 else if (Player.TryEnqueue(new SongRequest(url, sender, id), force))
@@ -811,16 +845,18 @@ public sealed partial class Plugin : IDalamudPlugin
             return;
         }
 
+        // The playlist cooldown is checked first, so someone who sends a playlist too soon always hears how long
+        // to wait, even within the few seconds of the per-person cooldown (which ignores requests silently).
         var now = DateTime.UtcNow;
-        if (lastRequest.TryGetValue(sender, out var last) && (now - last).TotalSeconds < Config.PerSenderCooldownSeconds)
-        {
-            AddLog(sender, url, "Ignored: cooldown", false);
-            return;
-        }
         if (playlist != null && PlaylistCooldownLeft(sender) is { } wait)
         {
             AddLog(sender, url, "Ignored: playlist cooldown", false);
             Replier.Send(encodedSender, sender, $"You can send another playlist in {Wait(wait)}.");
+            return;
+        }
+        if (lastRequest.TryGetValue(sender, out var last) && (now - last).TotalSeconds < Config.PerSenderCooldownSeconds)
+        {
+            AddLog(sender, url, "Ignored: cooldown", false);
             return;
         }
 
@@ -832,7 +868,7 @@ public sealed partial class Plugin : IDalamudPlugin
         }
 
         lastRequest[sender] = now;
-        if (playlist != null) lastPlaylist[sender] = now;
+        if (playlist != null) RememberPlaylist(sender, now);
         if (permission == RequestPermission.PreQueue)
         {
             if (Pending.Count >= Config.MaxQueueLength)

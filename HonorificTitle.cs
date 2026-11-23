@@ -78,7 +78,7 @@ public sealed class HonorificTitle : IDisposable
 
         var (title, shared, busy) = nowPlaying();
         var wanted = config.HonorificTitle && title != null && (shared || !config.HonorificOnlyWhenSharing)
-            ? Json(Format(title))
+            ? Json(Format(title, ArtistTurn(title)))
             : null;
 
         if (wanted != null)
@@ -119,20 +119,54 @@ public sealed class HonorificTitle : IDisposable
         idleSince = DateTime.MaxValue;
     }
 
-    /// <summary>"♪ Song" (or "♪ Artist - Song"), cut to Honorific's 32-character limit.</summary>
-    public string Format(string songTitle)
+    /// <summary>What the title shows: 0 the song's name, 1 the song's name then the artist, 2 swap between the two.</summary>
+    public const int ShowSong = 0, ShowSongThenArtist = 1, ShowSwap = 2;
+
+    /// <summary>"Artist - Song" (how Tundy names songs) -> (song, artist); artist is null when there's none.</summary>
+    private static (string Song, string? Artist) Split(string songTitle)
     {
         var text = new string(songTitle.Where(c => !char.IsControl(c)).ToArray()).Trim();
-        if (!config.HonorificWithArtist)
+        var dash = text.IndexOf(" - ", StringComparison.Ordinal);
+        if (dash <= 0 || dash + 3 >= text.Length) return (text, null);
+        return (text[(dash + 3)..].Trim(), text[..dash].Trim());
+    }
+
+    /// <summary>
+    /// The title for a song, cut to Honorific's 32-character limit: "♪ Song", "♪ Song · Artist", or (swapping)
+    /// "♪ Song" and "by Artist" taking turns, with <paramref name="artistTurn"/> picking the second one.
+    /// </summary>
+    public string Format(string songTitle, bool artistTurn = false)
+    {
+        var (song, artist) = Split(songTitle);
+        var text = config.HonorificShow switch
         {
-            var dash = text.IndexOf(" - ", StringComparison.Ordinal);
-            if (dash > 0 && dash + 3 < text.Length) text = text[(dash + 3)..].Trim();
-        }
-        text = "♪ " + text;
+            ShowSongThenArtist when artist != null => $"♪ {song} · {artist}",
+            ShowSwap when artist != null && artistTurn => $"by {artist}",
+            _ => $"♪ {song}",
+        };
         if (text.Length <= MaxLength) return text;
         var cut = MaxLength - 1;
         if (char.IsHighSurrogate(text[cut - 1])) cut--; // don't split an emoji or other two-part character
         return text[..cut].TrimEnd() + "…";
+    }
+
+    /// <summary>True when the song has an artist to swap to (for the settings preview).</summary>
+    public static bool HasArtist(string songTitle) => Split(songTitle).Artist != null;
+
+    // Swapping: which song the turns started with, and when.
+    private string? turnSong;
+    private DateTime turnsSince;
+
+    private bool ArtistTurn(string songTitle)
+    {
+        if (config.HonorificShow != ShowSwap) return false;
+        if (turnSong != songTitle)
+        {
+            turnSong = songTitle;
+            turnsSince = DateTime.Now; // a new song starts with its name
+        }
+        var seconds = Math.Clamp(config.HonorificSwapSeconds, 5, 60);
+        return (int)((DateTime.Now - turnsSince).TotalSeconds / seconds) % 2 == 1;
     }
 
     private string Json(string title)

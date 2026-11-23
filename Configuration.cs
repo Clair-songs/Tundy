@@ -41,8 +41,20 @@ public class Configuration : IPluginConfiguration
     /// <summary>Show the song that's playing as your character's title through the Honorific plugin.</summary>
     public bool HonorificTitle { get; set; }
 
-    /// <summary>"Artist - Song" instead of just the song's name.</summary>
+    /// <summary>
+    /// When each person last sent a playlist (UTC), so the playlist cooldown still counts after Tundy reloads or
+    /// updates. Old entries are removed when Tundy loads.
+    /// </summary>
+    public Dictionary<string, DateTime> LastPlaylistRequests { get; set; } = new();
+
+    /// <summary>Old (0.4.1-0.4.2) "include the artist" switch; moved into <see cref="HonorificShow"/> on load.</summary>
     public bool HonorificWithArtist { get; set; }
+
+    /// <summary>What the title shows: 0 the song's name, 1 the song's name then the artist, 2 swap between them.</summary>
+    public int HonorificShow { get; set; }
+
+    /// <summary>How long each one shows when swapping, in seconds (5-60).</summary>
+    public int HonorificSwapSeconds { get; set; } = 15;
 
     /// <summary>Above your name (Honorific's "prefix"), otherwise below it.</summary>
     public bool HonorificAbove { get; set; }

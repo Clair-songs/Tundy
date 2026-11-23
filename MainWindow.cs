@@ -346,8 +346,7 @@ public sealed class MainWindow : Window
         if (queue.Length > 0)
         {
             var summary = $"{queue.Length} song{(queue.Length == 1 ? "" : "s")}{TotalLength(queue.Select(q => q.Request))}";
-            ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(summary).X - 10 * scale);
-            ImGui.TextDisabled(summary);
+            Ui.TextRight(summary, Theme.Muted, 14 * scale);
         }
         if (queue.Length == 0)
         {
@@ -364,17 +363,15 @@ public sealed class MainWindow : Window
                 var right = string.Join(" · ", new[] { Ui.Length(r.KnownSeconds), isNext ? (ready ? "ready" : "getting it ready...") : "" }
                     .Where(s => s.Length > 0));
                 var info = $" · {r.Sender}";
-                var rightW = right.Length > 0 ? ImGui.CalcTextSize(right).X + 16 * scale : 0;
-                var nameW = ImGui.GetContentRegionAvail().X - rightW - ImGui.CalcTextSize(info).X - 10 * scale;
+                var rightW = right.Length > 0 ? ImGui.CalcTextSize(right).X + 28 * scale : 0;
+                var nameW = ImGui.GetContentRegionAvail().X - rightW - ImGui.CalcTextSize(info).X - 14 * scale;
+                ImGui.PushTextWrapPos(-1f); // one line per song: the name is shortened to fit instead
                 ImGui.TextUnformatted(Ui.Ellipsize(r.Display, Math.Max(nameW, 60 * scale)));
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(r.Display);
                 ImGui.SameLine(0, 0);
                 ImGui.TextDisabled(info);
-                if (right.Length > 0)
-                {
-                    ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(right).X - 10 * scale);
-                    ImGui.TextDisabled(right);
-                }
+                ImGui.PopTextWrapPos();
+                if (right.Length > 0) Ui.TextRight(right, Theme.Muted, 14 * scale);
                 ImGui.PopID();
             }
             if (queue.Length > 3)
@@ -1327,9 +1324,27 @@ public sealed class MainWindow : Window
             Ui.Help("Your title becomes the song while it plays. When the music stops, your own Honorific title comes back; "
                     + "Honorific's settings aren't changed. Lightless pairs who also have Honorific see it too, a few seconds later.");
             if (!on) ImGui.BeginDisabled();
-            var artist = cfg.HonorificWithArtist;
-            if (ImGui.Checkbox("Include the artist", ref artist)) { cfg.HonorificWithArtist = artist; changed = true; }
-            Ui.Help("Titles can be at most 32 characters, so longer names are cut short. Just the song's name fits more often.");
+            ImGui.TextUnformatted("The title shows:");
+            var show = Math.Clamp(cfg.HonorificShow, 0, 2);
+            if (ImGui.RadioButton("The song's name", ref show, HonorificTitle.ShowSong)
+                | ImGui.RadioButton("The song's name, then the artist", ref show, HonorificTitle.ShowSongThenArtist)
+                | ImGui.RadioButton("The song's name and the artist, taking turns", ref show, HonorificTitle.ShowSwap))
+            {
+                cfg.HonorificShow = show;
+                changed = true;
+            }
+            Ui.Help("Titles can be at most 32 characters, so longer names are cut short. Taking turns gives each one the full 32.");
+            if (show == HonorificTitle.ShowSwap)
+            {
+                ImGui.Indent();
+                ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+                var swap = Math.Clamp(cfg.HonorificSwapSeconds, 5, 60);
+                if (ImGui.SliderInt("Switch every (seconds)", ref swap, 5, 60)) { cfg.HonorificSwapSeconds = swap; changed = true; }
+                Ui.Help("You see every switch right away. Honorific passes your title on to other plugins at most once every "
+                        + "5 seconds, and Lightless then sends it, so your pairs may see the switches later or skip one. "
+                        + "10 seconds or more looks steadier for them.");
+                ImGui.Unindent();
+            }
             var above = cfg.HonorificAbove;
             if (ImGui.Checkbox("Above my name", ref above)) { cfg.HonorificAbove = above; changed = true; }
             var onlyShared = cfg.HonorificOnlyWhenSharing;
@@ -1348,7 +1363,10 @@ public sealed class MainWindow : Window
             var glow = cfg.HonorificGlow;
             if (ImGui.ColorEdit3("##hglowc", ref glow, ImGuiColorEditFlags.NoInputs)) { cfg.HonorificGlow = glow; changed = true; }
 
-            ImGui.TextDisabled($"Preview: 《{hon.Format(plugin.Player.Current?.Title ?? "Kid Francescoli - Moon (And It Went Like)")}》");
+            var sample = plugin.Player.Current?.Title ?? "Kid Francescoli - Moon (And It Went Like)";
+            ImGui.TextDisabled(cfg.HonorificShow == HonorificTitle.ShowSwap && HonorificTitle.HasArtist(sample)
+                ? $"Preview: 《{hon.Format(sample)}》, then 《{hon.Format(sample, artistTurn: true)}》"
+                : $"Preview: 《{hon.Format(sample)}》");
             if (hon.Status.Length > 0) ImGui.TextDisabled(hon.Status);
             if (!on) ImGui.EndDisabled();
         }
