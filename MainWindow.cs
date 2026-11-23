@@ -1005,6 +1005,12 @@ public sealed class MainWindow : Window
         if (ImGui.SliderInt("Cooldown per person (seconds)", ref cd, 0, 600)) { cfg.PerSenderCooldownSeconds = cd; changed = true; }
         Ui.Help("How long one person has to wait between requests.");
 
+        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
+        var plCd = cfg.PlaylistCooldownSeconds / 60;
+        if (ImGui.SliderInt("Playlist cooldown per person (minutes)", ref plCd, 0, 120)) { cfg.PlaylistCooldownSeconds = plCd * 60; changed = true; }
+        Ui.Help("How long one person has to wait between playlist requests (also with shuffle commands), on top of the cooldown above. "
+                + "With replies on, they're told how long is left. Playlists you add yourself or approve don't count.");
+
         Ui.Section("Announce songs in chat");
         var announce = cfg.AnnounceSongs;
         if (ImGui.Checkbox("Say the song name and who requested it when a song starts", ref announce)) { cfg.AnnounceSongs = announce; changed = true; }

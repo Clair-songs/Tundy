@@ -61,6 +61,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly Dictionary<string, DateTime> lastRequest = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> lastSkip = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> lastList = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> lastPlaylist = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<RequestLogEntry> requestLog = new();
 
     // "!skip"
@@ -518,6 +519,18 @@ public sealed partial class Plugin : IDalamudPlugin
 
     // ------------------------------------------------------------------ requests
 
+    /// <summary>How much longer this person has to wait before another playlist, or null if they don't.</summary>
+    private TimeSpan? PlaylistCooldownLeft(string sender)
+    {
+        if (sender == "You" || !lastPlaylist.TryGetValue(sender, out var at)) return null;
+        var left = TimeSpan.FromSeconds(Config.PlaylistCooldownSeconds) - (DateTime.UtcNow - at);
+        return left > TimeSpan.Zero ? left : null;
+    }
+
+    private static string Wait(TimeSpan t) =>
+        t.TotalSeconds < 60 ? $"{Math.Ceiling(t.TotalSeconds)} seconds"
+        : Math.Ceiling(t.TotalMinutes) is var m && m == 1 ? "1 minute" : $"{Math.Ceiling(t.TotalMinutes)} minutes";
+
     private static string SenderName(IHandleableChatMessage message) =>
         (message.Sender.Payloads.OfType<PlayerPayload>().FirstOrDefault()?.PlayerName ?? message.Sender.TextValue).Trim();
 
@@ -642,6 +655,15 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     var link = new PlaylistLink(kind, id, $"https://open.spotify.com/{kind}/{id}");
                     if (PlaylistProblem(link) is { } problem) { AddLog(sender, url, $"Ignored: {problem}", false); return; }
+                    // A share link only shows it's a playlist now, so the playlist cooldown is checked here
+                    // (not for your own adds or requests you approved).
+                    if (!force && PlaylistCooldownLeft(sender) is { } wait)
+                    {
+                        AddLog(sender, url, "Ignored: playlist cooldown", false);
+                        Replier.Send(encodedSender, sender, $"You can send another playlist in {Wait(wait)}.");
+                        return;
+                    }
+                    if (sender != "You") lastPlaylist[sender] = DateTime.UtcNow;
                     HandlePlaylist(encodedSender, sender, link, replyStart, shuffle);
                 }
                 else if (Player.TryEnqueue(new SongRequest(url, sender, id), force))
@@ -728,6 +750,12 @@ public sealed partial class Plugin : IDalamudPlugin
             AddLog(sender, url, "Ignored: cooldown", false);
             return;
         }
+        if (playlist != null && PlaylistCooldownLeft(sender) is { } wait)
+        {
+            AddLog(sender, url, "Ignored: playlist cooldown", false);
+            Replier.Send(encodedSender, sender, $"You can send another playlist in {Wait(wait)}.");
+            return;
+        }
 
         if (playlist == null && IsDuplicate(url, spotifyId))
         {
@@ -737,6 +765,7 @@ public sealed partial class Plugin : IDalamudPlugin
         }
 
         lastRequest[sender] = now;
+        if (playlist != null) lastPlaylist[sender] = now;
         if (permission == RequestPermission.PreQueue)
         {
             if (Pending.Count >= Config.MaxQueueLength)

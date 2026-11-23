@@ -212,6 +212,7 @@ Chat commands: `/tundy mini | play <link> | skip | stop | approve [all] | import
 
 ## Safety defaults (change them in the window)
 - Only YouTube and Spotify links are accepted, so senders can't make yt-dlp fetch other sites.
-- Max song length 10 min, no live streams, queue of up to 20, 30 s cooldown per sender.
+- Max song length 10 min, no live streams, queue of up to 20, 30 s cooldown per sender, and 10 min between
+  playlists from the same person (Settings → Requests → Playlist cooldown).
 - Only plain emote commands (`/word`) can be set as the music mod's emote.
 - If downloads start failing, click **Update yt-dlp** (YouTube changes often).

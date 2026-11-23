@@ -115,6 +115,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Seconds a single sender must wait between requests.</summary>
     public int PerSenderCooldownSeconds { get; set; } = 30;
 
+    /// <summary>Seconds a single sender must wait between playlist requests (on top of the normal cooldown).</summary>
+    public int PlaylistCooldownSeconds { get; set; } = 600;
+
     /// <summary>Accept Spotify track links (played via a matching YouTube upload).</summary>
     public bool AllowSpotify { get; set; } = true;
 
