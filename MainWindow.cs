@@ -114,10 +114,20 @@ public sealed class MainWindow : Window
             var setup = plugin.Music.SetupProblems();
             if (setup.Count > 0)
             {
-                var canSetUp = plugin.Music.IsRecommended && plugin.Music.State().Installed;
-                list.Add(new Problem("The music mod needs setting up", setup[0],
-                    canSetUp ? "Set it up for me" : "Open Sharing",
-                    canSetUp ? () => megaSetupResult = plugin.Music.SetUp() : OpenHowItPlays));
+                var music = plugin.Music;
+                var canSetUp = music.IsRecommended && music.State().Installed;
+                var other = !music.State().Installed && music.IsRecommended ? music.InstalledMega() : null;
+                if (other != null)
+                    list.Add(new Problem("The music mod needs setting up", setup[0], "Use it", () =>
+                    {
+                        cfg.QueueTargetMod = other;
+                        music.Recheck();
+                        plugin.SaveConfig();
+                    }));
+                else
+                    list.Add(new Problem("The music mod needs setting up", setup[0],
+                        canSetUp ? "Set it up for me" : "Open Sharing",
+                        canSetUp ? () => megaSetupResult = music.SetUp() : OpenHowItPlays));
             }
 
             if (plugin.Ffmpeg.CurrentPath == null)
@@ -664,9 +674,9 @@ public sealed class MainWindow : Window
         if (!music.IsRecommended)
         {
             ImGui.SameLine();
-            if (ImGui.SmallButton("Use Mega Music Mod"))
+            if (ImGui.SmallButton($"Use {music.PreferredMega}"))
             {
-                cfg.QueueTargetMod = MegaMusicMod.RecommendedMod;
+                cfg.QueueTargetMod = music.PreferredMega;
                 scannedRoutes = null;
                 music.Recheck();
                 changed = true;

@@ -234,6 +234,17 @@ public sealed partial class Plugin : IDalamudPlugin
             if (Config.QueueAliases.Count == 0) Config.QueueAliases.Add("!q");
             Config.Version = 5;
         }
+
+        // Before 0.4.2 every load added the default entry to these lists again ("sound/lolo.scd" 50 times, "!q"
+        // back after you removed it). Saved lists now replace the defaults; this removes the copies.
+        static List<string> Distinct(List<string> list) =>
+            list.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        Config.QueueAliases = Distinct(Config.QueueAliases);
+        Config.ShuffleCommands = Distinct(Config.ShuffleCommands);
+        Config.QueueScdRoutes = Distinct(Config.QueueScdRoutes);
+        Config.ImportRoutes = Distinct(Config.ImportRoutes);
+        if (Config.QueueAliases.Count == 0) Config.QueueAliases.Add("!q");
+        if (Config.QueueScdRoutes.Count == 0) Config.QueueScdRoutes.Add(MegaMusicMod.RecommendedRoute);
         SaveConfig();
     }
 

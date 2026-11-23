@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.4.1.0</Version>
+    <Version>0.4.2.0</Version>
     <Description>Plays songs people send you via /tell with "!q [link]": YouTube, Spotify and playlists.</Description>
     <PackageProjectUrl>https://github.com/Clair-songs/Tundy</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
@@ -12,5 +12,10 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Penumbra.Api" Version="5.19.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The music mod song slot's sound settings (with 2 s of silence), for music mods that ship without song files. -->
+    <EmbeddedResource Include="Resources\song-slot-template.scd" LogicalName="Tundy.song-slot-template.scd" />
   </ItemGroup>
 </Project>

@@ -118,7 +118,8 @@ Lightless, not Tundy.
 
 **Through the Mega Music Mod (recommended, how SoundyQ does it).** The Mega Music Mod's DJ dance on `/cheerjumpred`
 plays one sound file, `sound/lolo.scd`. For each song Tundy:
-1. turns it into a game sound file, using one of the music mod's own tracks as the template,
+1. turns it into a game sound file, using one of the music mod's own tracks as the template (versions of the mod
+   without songs, like the **No songs Ver.**, work too: Tundy then uses the song slot's settings it ships with),
 2. puts it on `sound/lolo.scd` in its own **Tundy Song** mod, which wins over the music mod (the music mod's files
    are never changed), and redraws you,
 3. waits a few seconds (default 10) so Lightless can upload it and your pairs can download it,
@@ -127,7 +128,8 @@ plays one sound file, `sound/lolo.scd`. For each song Tundy:
 Between songs, Tundy Song holds a short silent track on that file, so the dance (which keeps going after a song)
 doesn't play one of the music mod's own songs, and Lightless keeps knowing the file. One-time setup: in the Sharing tab click **Set up Mega Music Mod for me** (turns the mod on with
 its "Dj (Cheer Jump)" dance and the DJ deck for your race). You can pick another music mod, scan it for its sound
-files, and change the emote there.
+files, and change the emote there. The problems banner warns when the mod's dance isn't set to "Dj (Cheer Jump)",
+since only that dance plays the song slot on `/cheerjumpred`.
 
 **On one emote's own sound.** Works without a music mod: the song replaces an emote's normal sound while it plays
 (default `/fume`). `/cheerjumpred` is in that list too, set up to swap its start animation for Linkpearl's, whose

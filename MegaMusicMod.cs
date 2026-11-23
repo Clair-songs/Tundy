@@ -61,13 +61,20 @@ public sealed class MegaMusicMod
     {
         if ((DateTime.Now - stateAt).TotalSeconds < 3) return state;
         stateAt = DateTime.Now;
+        dance = null;
         try
         {
             if (!ModList().ContainsKey(config.QueueTargetMod)) return state = (false, false);
             if (objects.LocalPlayer == null) return state = (true, false);
             var (_, _, collection) = new GetCollectionForObject(pi).Invoke(0);
             var (ec, settings) = new GetCurrentModSettings(pi).Invoke(collection.Id, config.QueueTargetMod);
-            return state = (true, ec == PenumbraApiEc.Success && settings is { } s && s.Item1);
+            state = (true, ec == PenumbraApiEc.Success && settings is { } s && s.Item1);
+            if (state.Enabled)
+            {
+                try { dance = WrongDance(collection.Id); }
+                catch (Exception ex) { Plugin.Log.Debug(ex, "Couldn't read the music mod's dance"); }
+            }
+            return state;
         }
         catch
         {
@@ -80,13 +87,37 @@ public sealed class MegaMusicMod
     {
         var problems = new List<string>();
         var (installed, enabled) = State();
-        if (!installed) problems.Add($"\"{config.QueueTargetMod}\" isn't in Penumbra. Install it, or pick another music mod below.");
+        if (!installed)
+            problems.Add(IsRecommended && InstalledMega() is { } other
+                ? $"\"{config.QueueTargetMod}\" isn't in Penumbra, but \"{other}\" is. Use that one instead."
+                : $"\"{config.QueueTargetMod}\" isn't in Penumbra. Install it, or pick another music mod below.");
         else if (!enabled) problems.Add($"\"{config.QueueTargetMod}\" is turned off in your collection."
-                                        + (IsRecommended ? " Click \"Set up Mega Music Mod for me\"." : " Turn it on in Penumbra."));
+                                        + (IsRecommended ? " Click \"Set it up for me\"." : " Turn it on in Penumbra."));
+        else if (dance is { } d)
+            problems.Add($"The music mod's dance is \"{d}\", not \"{DjDance}\", so the songs won't play on {RecommendedEmote}. Click \"Set it up for me\".");
         return problems;
     }
 
-    public bool IsRecommended => config.QueueTargetMod.Equals(RecommendedMod, StringComparison.OrdinalIgnoreCase);
+    private const string DjDance = "Dj (Cheer Jump)";
+
+    // The Mega Music Mod's dance when it isn't the DJ one (null when it is, or when it can't be told).
+    private string? dance;
+
+    /// <summary>The Mega Music Mod's "Dance Animations" choice, if it isn't the DJ dance that plays the song slot.</summary>
+    private string? WrongDance(Guid collection)
+    {
+        if (!IsRecommended || SafeEmote(config.QueueEmoteCommand) != RecommendedEmote) return null;
+        var (ec, settings) = new GetCurrentModSettings(pi).Invoke(collection, config.QueueTargetMod);
+        if (ec != PenumbraApiEc.Success || settings is not { } s || !s.Item3.TryGetValue("Dance Animations", out var picked)) return null;
+        if (picked.Any(p => p.Equals(DjDance, StringComparison.OrdinalIgnoreCase))) return null;
+        return picked.Count > 0 ? string.Join(", ", picked) : "none";
+    }
+
+    /// <summary>The Mega Music Mod the "Use Mega Music Mod" button switches to: the installed version.</summary>
+    public string PreferredMega => InstalledMega() ?? RecommendedMod;
+
+    /// <summary>The Mega Music Mod, or another version of it (for example the "No songs Ver.").</summary>
+    public bool IsRecommended => config.QueueTargetMod.StartsWith(RecommendedMod, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Forces the next <see cref="State"/> call to check again.</summary>
     public void Recheck()
@@ -205,11 +236,40 @@ public sealed class MegaMusicMod
             catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't resolve {route}"); }
         }
 
+        // Music mods that ship without their songs (like the Mega Music Mod's "No songs Ver.") have no file on the
+        // slot. Then the sound settings of the Mega Music Mod's song slot, built into Tundy, are used.
+        if (bytes == null && route.Equals(RecommendedRoute, StringComparison.OrdinalIgnoreCase) && BuiltInTemplate() is { } builtIn)
+        {
+            Plugin.Log.Information($"\"{config.QueueTargetMod}\" has no file on {route}; using Tundy's built-in song slot settings");
+            bytes = builtIn;
+        }
+
         if (bytes == null)
             throw new FileNotFoundException($"No sound file for \"{route}\" found in \"{config.QueueTargetMod}\". Check the music mod and sound route in the Sharing tab.");
 
         lock (templates) templates[route] = bytes;
         return bytes;
+    }
+
+    /// <summary>The Mega Music Mod song slot's sound settings (with 2 seconds of silence), shipped with Tundy.</summary>
+    private static byte[]? BuiltInTemplate()
+    {
+        using var stream = typeof(MegaMusicMod).Assembly.GetManifestResourceStream("Tundy.song-slot-template.scd");
+        if (stream == null) return null;
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// The installed Mega Music Mod: the full one if it's there, otherwise another version of it (for example the
+    /// "No songs Ver."), or null.
+    /// </summary>
+    public string? InstalledMega()
+    {
+        var mods = ModList().Keys.ToList();
+        if (mods.Contains(RecommendedMod)) return RecommendedMod;
+        return mods.Where(m => m.StartsWith(RecommendedMod, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.Length).FirstOrDefault();
     }
 
     /// <summary>
@@ -258,24 +318,25 @@ public sealed class MegaMusicMod
             _ => "DJ - Dj Deck - Hyur, Miqo, Viera, Elez & Aura",
         };
 
-        var ec = new TrySetMod(pi).Invoke(collection.Id, RecommendedMod, true);
+        var mod = IsRecommended ? config.QueueTargetMod : PreferredMega;
+        var ec = new TrySetMod(pi).Invoke(collection.Id, mod, true);
         if (ec is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged))
             return $"Penumbra couldn't turn on the Mega Music Mod ({ec}).";
 
-        var dance = setOptions.Invoke(collection.Id, RecommendedMod, "Dance Animations", new[] { "Dj (Cheer Jump)" });
+        var dance = setOptions.Invoke(collection.Id, mod, "Dance Animations", new[] { DjDance });
 
         // "VFX Options" lets you pick several at once: keep what you already have on and add the deck. Only the
         // other DJ decks come off, since only one fits your character.
         var current = new List<string>();
         try
         {
-            var (sec, settings) = new GetCurrentModSettings(pi).Invoke(collection.Id, RecommendedMod);
+            var (sec, settings) = new GetCurrentModSettings(pi).Invoke(collection.Id, mod);
             if (sec == PenumbraApiEc.Success && settings is { } s && s.Item3.TryGetValue("VFX Options", out var on))
                 current = on.ToList();
         }
         catch (Exception ex) { Plugin.Log.Debug(ex, "Couldn't read the Mega Music Mod's VFX options"); }
         var wanted = current.Where(o => !o.StartsWith("DJ - Dj Deck", StringComparison.OrdinalIgnoreCase)).Append(deck).Distinct().ToArray();
-        var vfx = setOptions.Invoke(collection.Id, RecommendedMod, "VFX Options", wanted);
+        var vfx = setOptions.Invoke(collection.Id, mod, "VFX Options", wanted);
         new RedrawObject(pi).Invoke(0);
         Recheck();
         Plugin.Log.Information($"Mega Music Mod on in \"{collection.Name}\": dance={dance}, vfx={vfx} ({deck})");

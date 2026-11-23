@@ -174,12 +174,16 @@ public class Configuration : IPluginConfiguration
     // ---- Song queue (Tundy's own version of SoundyQ) ----
 
     /// <summary>Tell commands people can request songs with, e.g. "!q", "!play".</summary>
+    // Replace, not add to, the defaults when loading saved settings (otherwise each load adds the default again).
+    [Newtonsoft.Json.JsonProperty(ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace)]
     public List<string> QueueAliases { get; set; } = new() { "!q" };
 
     /// <summary>Accept the shuffle commands below.</summary>
     public bool AllowShuffleCommand { get; set; } = true;
 
     /// <summary>Tell commands that queue a playlist shuffled, e.g. "!shuffle" (otherwise they work like a request).</summary>
+    // Replace, not add to, the defaults when loading saved settings (otherwise each load adds the default again).
+    [Newtonsoft.Json.JsonProperty(ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace)]
     public List<string> ShuffleCommands { get; set; } = new() { "!shuffle" };
 
     /// <summary>Who can request songs (players in <see cref="QueuePlayerRules"/> get their own setting instead).</summary>
@@ -192,6 +196,8 @@ public class Configuration : IPluginConfiguration
     public string QueueTargetMod { get; set; } = MegaMusicMod.RecommendedMod;
 
     /// <summary>Game sound files in that mod that carry the song, e.g. "sound/lolo.scd".</summary>
+    // Replace, not add to, the defaults when loading saved settings (otherwise each load adds the default again).
+    [Newtonsoft.Json.JsonProperty(ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace)]
     public List<string> QueueScdRoutes { get; set; } = new() { MegaMusicMod.RecommendedRoute };
 
     /// <summary>Emote whose dance plays the music mod's song slot.</summary>
@@ -209,6 +215,8 @@ public class Configuration : IPluginConfiguration
     public string ImportTargetMod { get; set; } = MegaMusicMod.RecommendedMod;
 
     /// <summary>Game sound files in that mod the imported song goes on.</summary>
+    // Replace, not add to, the defaults when loading saved settings (otherwise each load adds the default again).
+    [Newtonsoft.Json.JsonProperty(ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace)]
     public List<string> ImportRoutes { get; set; } = new() { MegaMusicMod.RecommendedRoute };
 
     /// <summary>Pick the imported song in the mod right away.</summary>
