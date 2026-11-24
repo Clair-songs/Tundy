@@ -57,6 +57,7 @@ $entry = [ordered]@{
     CanUnloadAsync = $false; AcceptsFeedback = $false; IsHide = $false; IsTestingExclusive = $false; DownloadCount = 0
     LastUpdate = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     DownloadLinkInstall = $zipUrl; DownloadLinkUpdate = $zipUrl; DownloadLinkTesting = $zipUrl
+    IconUrl = $manifest.IconUrl
 }
 $pluginmaster = Join-Path $tmp "pluginmaster.json"
 [IO.File]::WriteAllText($pluginmaster, (ConvertTo-Json -InputObject @($entry) -Depth 5), (New-Object Text.UTF8Encoding $false))

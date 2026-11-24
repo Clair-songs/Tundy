@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="512" height="512">
+  <!-- Tundy's icon: a tuxedo cat with headphones and a "T" collar tag, in the pastel purple theme. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2C2340"/>
+      <stop offset="1" stop-color="#1A1424"/>
+    </linearGradient>
+    <clipPath id="sq"><rect width="160" height="160" rx="36"/></clipPath>
+  </defs>
+  <rect width="160" height="160" rx="36" fill="url(#bg)"/>
+  <g clip-path="url(#sq)">
+    <!-- ears -->
+    <path d="M30 74 L35 24 L68 50 Z" fill="#4A4060"/>
+    <path d="M37 64 L39 36 L59 52 Z" fill="#F4A9D2"/>
+    <path d="M130 74 L125 24 L92 50 Z" fill="#4A4060"/>
+    <path d="M123 64 L121 36 L101 52 Z" fill="#F4A9D2"/>
+    <!-- headphone band -->
+    <path d="M28 80 C26 22 134 22 132 80" fill="none" stroke="#C6B5F7" stroke-width="7" stroke-linecap="round"/>
+    <!-- head and white blaze -->
+    <ellipse cx="80" cy="90" rx="55" ry="44" fill="#4A4060"/>
+    <path d="M75 47 C77 62 75 80 71 95 C64 103 57 112 61 122 C69 133 91 133 99 122 C103 112 96 103 89 95 C85 80 83 62 85 47 Z" fill="#F3EEFA"/>
+    <!-- squinty eyes -->
+    <ellipse cx="55" cy="86" rx="11" ry="5" fill="#F6C98C"/>
+    <path d="M43 86 Q55 78 67 86 L67 77 L43 77 Z" fill="#4A4060"/>
+    <path d="M44 86 Q55 79.5 66 86" fill="none" stroke="#C6B5F7" stroke-width="1.4"/>
+    <ellipse cx="57" cy="87.5" rx="1.1" ry="2.4" fill="#2A2238"/>
+    <ellipse cx="105" cy="86" rx="11" ry="5" fill="#F6C98C"/>
+    <path d="M93 86 Q105 78 117 86 L117 77 L93 77 Z" fill="#4A4060"/>
+    <path d="M94 86 Q105 79.5 116 86" fill="none" stroke="#C6B5F7" stroke-width="1.4"/>
+    <ellipse cx="103" cy="87.5" rx="1.1" ry="2.4" fill="#2A2238"/>
+    <!-- nose, mouth, tongue -->
+    <path d="M74 101 Q80 97 86 101 Q83 108 80 109 Q77 108 74 101 Z" fill="#B99AB0"/>
+    <path d="M80 109 V113" stroke="#2A2238" stroke-width="1.2"/>
+    <path d="M74.5 114 Q80 112 85.5 114 Q86 123 80 123 Q74 123 74.5 114 Z" fill="#F4A9D2"/>
+    <path d="M80 115 V120" stroke="#E58BB9" stroke-width="1"/>
+    <!-- whiskers -->
+    <g fill="none" stroke="#EEE7F8" stroke-width="1.2" stroke-linecap="round" opacity=".9">
+      <path d="M66 110 Q38 102 10 98"/><path d="M66 113 Q36 112 8 114"/><path d="M67 116 Q40 122 14 130"/>
+      <path d="M94 110 Q122 102 150 98"/><path d="M94 113 Q124 112 152 114"/><path d="M93 116 Q120 122 146 130"/>
+      <path d="M58 74 Q48 56 40 40"/><path d="M62 72 Q58 54 56 36"/>
+      <path d="M102 74 Q112 56 120 40"/><path d="M98 72 Q102 54 104 36"/>
+    </g>
+    <!-- collar and T tag -->
+    <path d="M47 126 Q80 144 113 126" fill="none" stroke="#8EE3C1" stroke-width="6.5" stroke-linecap="round"/>
+    <circle cx="80" cy="145" r="8" fill="#F6C98C"/>
+    <circle cx="80" cy="145" r="8" fill="none" stroke="#D9A85E" stroke-width="1.2"/>
+    <text x="80" y="148.6" text-anchor="middle" font-size="10" font-weight="700" fill="#4A3A20" font-family="Segoe UI, Arial, sans-serif">T</text>
+    <!-- headphone cups and note -->
+    <rect x="18" y="72" width="18" height="32" rx="9" fill="#7A63C2"/>
+    <rect x="22" y="77" width="10" height="22" rx="5" fill="#C6B5F7"/>
+    <rect x="124" y="72" width="18" height="32" rx="9" fill="#7A63C2"/>
+    <rect x="128" y="77" width="10" height="22" rx="5" fill="#C6B5F7"/>
+    <path d="M142 22 v13 a4 4 0 1 1 -2.5 -3.7 v-6.3 l-6 1.4 v8 a4 4 0 1 1 -2.5 -3.7 v-6.6 z" fill="#F4A9D2"/>
+  </g>
+</svg>
