@@ -1,12 +1,14 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.4.4.0</Version>
+    <Version>0.4.5.0</Version>
     <Description>Plays songs people send you via /tell with "!q [link]": YouTube, Spotify and playlists.</Description>
     <PackageProjectUrl>https://github.com/Clair-songs/Tundy</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Error messages show /_/Tundy/File.cs:line N instead of the folder on the computer that built it. -->
+    <PathMap>$(MSBuildProjectDirectory)=/_/Tundy</PathMap>
   </PropertyGroup>
 
   <ItemGroup>
