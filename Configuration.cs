@@ -28,7 +28,11 @@ public class Configuration : IPluginConfiguration
     public bool LockMiniPlayer { get; set; } = false;
 
     /// <summary>Pastel purple look for Tundy's windows. Off = Dalamud's normal look.</summary>
+    /// <summary>Old (0.4.0-0.4.5) pastel on/off switch; off becomes Dalamud's look in <see cref="ThemeChoice"/> on load.</summary>
     public bool PastelTheme { get; set; } = true;
+
+    /// <summary>Tundy's look: pastel purple (default), minimal, or Dalamud's own.</summary>
+    public ThemeStyle ThemeChoice { get; set; } = ThemeStyle.Pastel;
 
     /// <summary>Show the welcome guide the next time the control panel opens (set for brand-new setups).</summary>
     public bool ShowWelcome { get; set; }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
@@ -26,7 +26,7 @@ public sealed class MiniPlayerWindow : Window
     {
         Flags = plugin.Config.LockMiniPlayer ? BaseFlags | ImGuiWindowFlags.NoMove : BaseFlags;
         if (plugin.Config.CompactMiniPlayer) Flags |= ImGuiWindowFlags.NoTitleBar; // right-click it to hide it
-        Theme.Push(plugin.Config.PastelTheme);
+        Theme.Push(plugin.Config.ThemeChoice);
     }
 
     public override void PostDraw() => Theme.Pop();
@@ -82,7 +82,7 @@ public sealed class MiniPlayerWindow : Window
         var fraction = elapsed is { } e && total is { } t && t > TimeSpan.Zero
             ? (float)Math.Clamp(e.TotalSeconds / t.TotalSeconds, 0, 1)
             : 0f;
-        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, Theme.Active ? Theme.LavenderLight with { W = 0.85f } : Theme.Info);
+        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, Theme.Bar);
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3f * scale);
         ImGui.ProgressBar(fraction, new Vector2(middle, 6 * scale), "");
         ImGui.PopStyleVar();
@@ -122,7 +122,7 @@ public sealed class MiniPlayerWindow : Window
         var label = np.Title == null ? "" : $"{Time(elapsed)} / {Time(total)}";
         var buttons = (ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.X) * 2;
 
-        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, Theme.Active ? Theme.LavenderLight with { W = 0.85f } : Theme.Info);
+        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, Theme.Bar);
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 8f * scale);
         ImGui.ProgressBar(fraction, new Vector2(width - buttons, ImGui.GetFrameHeight()), label);
         ImGui.PopStyleVar();

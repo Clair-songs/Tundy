@@ -49,7 +49,7 @@ public sealed partial class MainWindow : Window
 
     public void SelectImportTab() => page = Page.Import;
 
-    public override void PreDraw() => Theme.Push(plugin.Config.PastelTheme);
+    public override void PreDraw() => Theme.Push(plugin.Config.ThemeChoice);
 
     public override void PostDraw() => Theme.Pop();
 
@@ -244,19 +244,48 @@ public sealed partial class MainWindow : Window
             (Page.Settings, FontAwesomeIcon.Cog, "Settings"),
         };
 
+        var minimal = Theme.IsMinimal;
+        var scale = ImGuiHelpers.GlobalScale;
         for (var i = 0; i < tabs.Length; i++)
         {
             var (p, icon, label) = tabs[i];
-            if (i > 0) Ui.SameLineIfFits(ImGuiComponents.GetIconButtonWithTextWidth(icon, label));
             var selected = page == p;
-            var on = Theme.Active ? Theme.LavenderDeep : Theme.Info with { W = 0.5f };
-            var off = Theme.Active ? Theme.PlumCard : new Vector4(1, 1, 1, 0.06f);
-            ImGui.PushStyleColor(ImGuiCol.Button, selected ? on : off);
-            ImGui.PushStyleColor(ImGuiCol.Text, selected || !Theme.Active ? Theme.TextLight : Theme.TextMuted);
             ImGui.PushID($"tab{i}");
-            if (ImGuiComponents.IconButtonWithText(icon, label)) page = p;
+            if (minimal)
+            {
+                // Minimal: tabs are plain text, the open one bright with a line under it.
+                var padding = new Vector2(2 * scale, ImGui.GetStyle().FramePadding.Y);
+                if (i > 0)
+                {
+                    ImGui.SameLine(0, 14 * scale);
+                    if (ImGui.GetCursorPosX() + ImGui.CalcTextSize(label).X + padding.X * 2 > ImGui.GetWindowContentRegionMax().X)
+                        ImGui.NewLine();
+                }
+                ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, padding);
+                ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0, 0, 0, 0));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1, 1, 1, 0.05f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1, 1, 1, 0.08f));
+                ImGui.PushStyleColor(ImGuiCol.Text, selected ? Theme.TextLight : Theme.TextMuted);
+                if (ImGui.Button(label)) page = p;
+                ImGui.PopStyleColor(4);
+                ImGui.PopStyleVar(2);
+                if (selected)
+                {
+                    var min = ImGui.GetItemRectMin();
+                    var max = ImGui.GetItemRectMax();
+                    ImGui.GetWindowDrawList().AddLine(new Vector2(min.X, max.Y), max, ImGui.GetColorU32(Theme.TextLight), 1.5f * scale);
+                }
+            }
+            else
+            {
+                if (i > 0) Ui.SameLineIfFits(ImGuiComponents.GetIconButtonWithTextWidth(icon, label));
+                ImGui.PushStyleColor(ImGuiCol.Button, selected ? Theme.TabOn : Theme.TabOff);
+                ImGui.PushStyleColor(ImGuiCol.Text, selected || !Theme.Active ? Theme.TextLight : Theme.TextMuted);
+                if (ImGuiComponents.IconButtonWithText(icon, label)) page = p;
+                ImGui.PopStyleColor(2);
+            }
             ImGui.PopID();
-            ImGui.PopStyleColor(2);
             if (p == Page.NowPlaying && waiting > 0) Ui.Tooltip($"{waiting} request(s) waiting for your approval");
         }
     }
@@ -1355,9 +1384,12 @@ public sealed partial class MainWindow : Window
 
         if (Ui.Group("Look"))
         {
-            var pastel = cfg.PastelTheme;
-            if (ImGui.Checkbox("Pastel purple theme", ref pastel)) { cfg.PastelTheme = pastel; changed = true; }
-            Ui.Help("Off = Dalamud's normal look. Only Tundy's windows change.");
+            string[] looks = { "Pastel purple", "Minimal", "Dalamud's own look" };
+            var look = Math.Clamp((int)cfg.ThemeChoice, 0, looks.Length - 1);
+            ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+            if (ImGui.Combo("Theme", ref look, looks, looks.Length)) { cfg.ThemeChoice = (ThemeStyle)look; changed = true; }
+            Ui.Help("Pastel purple: dark plum with lavender, mint and pink. Minimal: near-black and greys, with colour only on small "
+                    + "status dots. Dalamud's own look: Dalamud's normal colours. Only Tundy's windows change.");
             var covers = cfg.ShowCoverArt;
             if (ImGui.Checkbox("Show song covers", ref covers)) { cfg.ShowCoverArt = covers; changed = true; }
             Ui.Help("The song's YouTube thumbnail, loaded from YouTube's image server (i.ytimg.com) for the song that's playing.");

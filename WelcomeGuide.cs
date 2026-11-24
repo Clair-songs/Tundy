@@ -60,7 +60,7 @@ public sealed partial class MainWindow
         for (var i = 0; i < GuideSteps; i++)
         {
             var min = start + new Vector2(i * (seg + gap), 0);
-            var color = i <= guideStep ? (Theme.Active ? Theme.LavenderLight : Theme.Info) : new Vector4(1, 1, 1, 0.1f);
+            var color = i <= guideStep ? Theme.Bar : new Vector4(1, 1, 1, 0.1f);
             dl.AddRectFilled(min, min + new Vector2(seg, 4 * scale), ImGui.GetColorU32(color), 2 * scale);
         }
         ImGui.Dummy(new Vector2(width, 4 * scale));
@@ -86,7 +86,7 @@ public sealed partial class MainWindow
         var last = guideStep == GuideSteps - 1;
         var next = last ? (cfg.Enabled ? "Finish" : "Finish and accept requests") : "Next";
         ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - ImGui.CalcTextSize(next).X - ImGui.GetStyle().FramePadding.X * 2);
-        ImGui.PushStyleColor(ImGuiCol.Button, Theme.Active ? Theme.LavenderMid : Theme.Info with { W = 0.6f });
+        ImGui.PushStyleColor(ImGuiCol.Button, Theme.PrimaryButton);
         var go = ImGui.Button(next);
         ImGui.PopStyleColor();
         if (go)

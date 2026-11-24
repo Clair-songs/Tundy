@@ -210,7 +210,9 @@ ffmpeg download the first time, a **Getting ready** card shows each one (ffmpeg 
 Existing setups don't see the guide and keep their settings.
 
 ## In-game control panel (`/tundy`)
-Pastel purple look, with a switch back to Dalamud's normal look in Settings → Look.
+Three looks in Settings → Look → Theme, switchable any time: **Pastel purple** (the default: dark plum, lavender, mint
+and pink), **Minimal** (near-black and greys, text-only tabs with a line under the open one, outlined buttons, colour only
+on small status dots), or **Dalamud's own look**. The mini player and the welcome guide follow the same choice.
 - **Problems banner**: shows only when something's wrong, with a button that fixes it or opens where to fix it: TellTunes
   or SoundyQ also on (SoundyQ also counts when it holds the music mod's song slot, which beats Tundy's even with
   different request commands), Penumbra not running, the music mod not set up, ffmpeg missing, the emote not learned,
@@ -223,7 +225,7 @@ Pastel purple look, with a switch back to Dalamud's normal look in Settings → 
   the emote once and checks the game loads Tundy's sound for your character), then sections for how it plays, starting
   songs and good-to-know notes.
 - **Import**: add songs to mods, and the sound replacer.
-- **Settings** (groups you can open and close): look (theme, covers), requests and cooldowns, the Honorific title, announcements, skipping, replies, retries, playlists, playback, the Now playing window, download tools, clean up.
+- **Settings** (groups you can open and close): look (theme: pastel, minimal or Dalamud's; covers), requests and cooldowns, the Honorific title, announcements, skipping, replies, retries, playlists, playback, the Now playing window, download tools, clean up.
 
 **Now playing window** (`/tundy mini`, or the window button at the top right of the panel): the song's name, a
 progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing

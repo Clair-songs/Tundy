@@ -64,6 +64,26 @@ public static class Ui
     /// <summary>Rounded, coloured status button. Returns true when clicked.</summary>
     public static bool Pill(string label, Vector4 color, string tooltip)
     {
+        if (Theme.IsMinimal)
+        {
+            // Minimal: plain grey text with a small coloured dot in front, still clickable.
+            var s = ImGuiHelpers.GlobalScale;
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 3) * s);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0, 0, 0, 0));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1, 1, 1, 0.05f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(1, 1, 1, 0.08f));
+            ImGui.PushStyleColor(ImGuiCol.Text, Theme.TextMuted);
+            var hit = ImGui.Button("   " + label + "##" + label);
+            ImGui.PopStyleColor(4);
+            ImGui.PopStyleVar(2);
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            ImGui.GetWindowDrawList().AddCircleFilled(new Vector2(min.X + 8 * s, (min.Y + max.Y) / 2), 3 * s, ImGui.GetColorU32(color));
+            Tooltip(tooltip);
+            return hit;
+        }
+
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 12f * ImGuiHelpers.GlobalScale);
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(10, 3) * ImGuiHelpers.GlobalScale);
         ImGui.PushStyleColor(ImGuiCol.Button, color with { W = 0.22f });
@@ -119,9 +139,17 @@ public static class Ui
         var right = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
         var dl = ImGui.GetWindowDrawList();
         dl.ChannelsSetCurrent(0);
-        var rounding = 8 * ImGuiHelpers.GlobalScale;
-        dl.AddRectFilled(start, new Vector2(right, bottom), ImGui.GetColorU32(background), rounding);
-        if (border is { } b) dl.AddRect(start, new Vector2(right, bottom), ImGui.GetColorU32(b), rounding);
+        var rounding = (Theme.IsMinimal ? 4 : 8) * ImGuiHelpers.GlobalScale;
+        if (Theme.IsMinimal && border == null)
+        {
+            // Minimal: no panel, just a thin line above the section.
+            dl.AddLine(start, new Vector2(right, start.Y), ImGui.GetColorU32(Theme.Line), 1f);
+        }
+        else
+        {
+            dl.AddRectFilled(start, new Vector2(right, bottom), ImGui.GetColorU32(background), rounding);
+            if (border is { } b) dl.AddRect(start, new Vector2(right, bottom), ImGui.GetColorU32(b), rounding);
+        }
         dl.ChannelsMerge();
         ImGui.Dummy(new Vector2(0, pad));
         ImGui.Spacing();
@@ -186,11 +214,11 @@ public static class Ui
         }
         else
         {
-            dl.AddRectFilled(min, max, ImGui.GetColorU32(Theme.Active ? Theme.LavenderDeep : new Vector4(1, 1, 1, 0.08f)), rounding);
+            dl.AddRectFilled(min, max, ImGui.GetColorU32(Theme.CoverFill), rounding);
             ImGui.PushFont(UiBuilder.IconFont);
             var icon = FontAwesomeIcon.Music.ToIconString();
             var iconSize = ImGui.CalcTextSize(icon);
-            dl.AddText(min + (new Vector2(size) - iconSize) / 2, ImGui.GetColorU32(Theme.Active ? Theme.LavenderLight : Theme.Muted), icon);
+            dl.AddText(min + (new Vector2(size) - iconSize) / 2, ImGui.GetColorU32(Theme.CoverIcon), icon);
             ImGui.PopFont();
         }
         ImGui.Dummy(new Vector2(size));

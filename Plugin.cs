@@ -275,6 +275,13 @@ public sealed partial class Plugin : IDalamudPlugin
             Config.Version = 6;
         }
 
+        // 0.4.6: the pastel on/off switch became a choice of looks; "off" was Dalamud's own look.
+        if (!Config.PastelTheme)
+        {
+            Config.ThemeChoice = ThemeStyle.Dalamud;
+            Config.PastelTheme = true;
+        }
+
         // 0.4.3: "Include the artist" became one of the choices for what the Honorific title shows.
         if (Config.HonorificWithArtist)
         {
