@@ -24,19 +24,26 @@ $project = Split-Path -Parent $PSScriptRoot
 $tmp = Join-Path $env:TEMP "tundy-publish"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
+# Each call is tried up to 4 times (waiting 5, 10, 20 s): a network hiccup or GitHub briefly slowing down many uploads
+# in a row shouldn't stop a publish halfway. Nothing goes live until the last step moves the branch.
 function Invoke-Gh([string]$method, [string]$path, $body) {
-    if ($null -eq $body) {
-        $out = & $gh api --method $method $path
-        if ($LASTEXITCODE -ne 0) { throw "GitHub API $method $path failed." }
-        return $out | ConvertFrom-Json
+    $file = $null
+    if ($null -ne $body) {
+        $file = Join-Path $tmp ("body-" + [guid]::NewGuid().ToString("N") + ".json")
+        [IO.File]::WriteAllText($file, ($body | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
     }
-    $file = Join-Path $tmp ("body-" + [guid]::NewGuid().ToString("N") + ".json")
-    [IO.File]::WriteAllText($file, ($body | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
     try {
-        $out = & $gh api --method $method $path --input $file
-        if ($LASTEXITCODE -ne 0) { throw "GitHub API $method $path failed." }
-        return $out | ConvertFrom-Json
-    } finally { Remove-Item $file -Force }
+        foreach ($try in 1..4) {
+            $out = if ($null -eq $file) { & $gh api --method $method $path } else { & $gh api --method $method $path --input $file }
+            if ($LASTEXITCODE -eq 0) { return $out | ConvertFrom-Json }
+            if ($try -lt 4) {
+                $wait = 5 * [Math]::Pow(2, $try - 1)
+                Write-Host "  GitHub API $method $path failed, trying again in $wait s..."
+                Start-Sleep -Seconds $wait
+            }
+        }
+        throw "GitHub API $method $path failed."
+    } finally { if ($null -ne $file) { Remove-Item $file -Force } }
 }
 
 # 1. Build
@@ -71,8 +78,14 @@ $files["pluginmaster.json"] = $pluginmaster
 $files["plugins/Tundy/latest.zip"] = Join-Path $package "latest.zip"
 
 # 4. Repository (created once, with a first commit so files can be added in one go)
-$null = & $gh api "repos/$Owner/$Repo" 2>$null
-if ($LASTEXITCODE -ne 0) {
+# A network hiccup also fails this check, so try a few times before deciding the repository doesn't exist.
+$exists = $false
+foreach ($try in 1..3) {
+    $null = & $gh api "repos/$Owner/$Repo" 2>$null
+    if ($LASTEXITCODE -eq 0) { $exists = $true; break }
+    Start-Sleep -Seconds 3
+}
+if (-not $exists) {
     & $gh repo create "$Owner/$Repo" --public --add-readme --description "Tundy: a Dalamud (FFXIV) plugin that plays songs people send you by /tell, for you and your Lightless pairs. TellTunes + SoundyQ + Soundy's import tools. AGPL-3.0." | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Couldn't create the repository." }
     Write-Host "Created https://github.com/$Owner/$Repo"

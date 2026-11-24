@@ -187,7 +187,9 @@ Send a playlist like a song: `!q <playlist link>`.
 - Failed downloads are retried automatically for temporary problems (network, HTTP 403, bot checks, timeouts), with
   a yt-dlp update before the last try. Songs that can never play (private, age-restricted, too long, live...) aren't.
 - When YouTube refuses a download with HTTP 403 or 503 (it often does over IPv6), Tundy tries again right away over
-  IPv4 and keeps using IPv4 for the rest of the session.
+  IPv4 and keeps using IPv4 for the rest of the session. If YouTube still refuses, Tundy waits a moment and tries gently: one
+  piece of the song at a time instead of four, with longer waits between yt-dlp's own retries. When that works, it keeps
+  downloading gently for the rest of the session.
 
 ## Song as your title (Honorific)
 With the [Honorific](https://github.com/Caraxi/Honorific) plugin installed, Settings → Song as your title can show the

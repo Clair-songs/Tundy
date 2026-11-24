@@ -154,7 +154,18 @@ public sealed class YtDlp
     /// Downloads the audio of a single video into <paramref name="outDir"/> as "<paramref name="fileStem"/>.ext".
     /// Picks an m4a/AAC stream so no ffmpeg is required for playback via Media Foundation.
     /// </summary>
-    public async Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem = null)
+    public Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem = null) =>
+        DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, Gentle);
+
+    /// <summary>
+    /// Download gently: one piece at a time and longer waits between yt-dlp's own retries. Turned on for the rest of
+    /// the session once a gentle try gets past a 403/503 that a normal one didn't.
+    /// (Picking YouTube player types by hand was tried and left out: on 2026-11-24 every type other than yt-dlp's
+    /// own default choice returned no audio at all.)
+    /// </summary>
+    public bool Gentle { get; private set; }
+
+    private async Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem, bool gentle)
     {
         await EnsureInstalledAsync(ct);
         Directory.CreateDirectory(outDir);
@@ -162,22 +173,35 @@ public sealed class YtDlp
         var stem = string.IsNullOrWhiteSpace(fileStem) ? Guid.NewGuid().ToString("N") : fileStem;
         var template = Path.Combine(outDir, stem + ".%(ext)s");
 
-        var args = new[]
+        var args = new List<string>
         {
             "--no-playlist",
             "--no-progress",
             "--no-warnings",
             "--restrict-filenames",
-            "--concurrent-fragments", "4", // download several pieces at once
+            // Normally several pieces at once (faster). Gently, one at a time: fewer requests in a burst, which is
+            // what makes YouTube answer 503.
+            "--concurrent-fragments", gentle ? "1" : "4",
+        };
+        if (gentle)
+        {
+            args.AddRange(new[]
+            {
+                "--retries", "6", "--fragment-retries", "6",
+                "--retry-sleep", "http:exp=2:20", "--retry-sleep", "fragment:exp=2:20", // wait 2, 4, 8, 16, 20 s...
+            });
+        }
+        args.AddRange(new[]
+        {
             "--match-filter", $"duration <= {maxDurationSeconds} & !is_live",
             "-f", "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio",
             "-o", template,
             "--print", "after_move:%(title)s\t%(artist)s\t%(track)s\t%(duration)s",
             "--print", "after_move:filepath",
             "--", url,
-        };
+        });
 
-        var (exit, stdout, stderr) = await RunAsync(args, ct);
+        var (exit, stdout, stderr) = await RunAsync(args.ToArray(), ct);
         var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         if (exit != 0 || lines.Length < 2)
@@ -186,13 +210,31 @@ public sealed class YtDlp
             if (string.IsNullOrEmpty(reason) && lines.Length == 0)
                 reason = $"Video rejected (live stream, or longer than {maxDurationSeconds}s).";
 
-            // YouTube often refuses IPv6 connections with 403/503. Try again right away over IPv4, and keep using
-            // IPv4 for the rest of the session.
-            if (!ForceIpv4 && RetryPolicy.IsBlockedByYouTube(reason))
+            if (RetryPolicy.IsBlockedByYouTube(reason))
             {
-                ForceIpv4 = true;
-                Plugin.Log.Warning($"YouTube refused the download of {url} ({RetryPolicy.Short(reason)}). Trying again over IPv4.");
-                return await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem);
+                // 1. YouTube often refuses IPv6 connections with 403/503. Try again right away over IPv4, and keep
+                //    using IPv4 for the rest of the session.
+                if (!ForceIpv4)
+                {
+                    ForceIpv4 = true;
+                    Plugin.Log.Warning($"YouTube refused the download of {url} ({RetryPolicy.Short(reason)}). Trying again over IPv4.");
+                    return await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle);
+                }
+
+                // 2. Still refused: wait a moment, then try gently (see Gentle). If that works, keep it for the session.
+                if (!gentle)
+                {
+                    Plugin.Log.Warning($"YouTube refused the download of {url} again ({RetryPolicy.Short(reason)}). "
+                                       + "Trying gently: one piece at a time, with longer waits.");
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    var song = await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle: true);
+                    if (!Gentle)
+                    {
+                        Gentle = true;
+                        Plugin.Log.Information("The gentle download worked; Tundy keeps downloading that way for the rest of the session.");
+                    }
+                    return song;
+                }
             }
             throw new InvalidOperationException(reason.Length > 300 ? reason[..300] : reason);
         }
