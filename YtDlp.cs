@@ -207,8 +207,9 @@ public sealed class YtDlp
         if (exit != 0 || lines.Length < 2)
         {
             var reason = stderr.Trim();
-            if (string.IsNullOrEmpty(reason) && lines.Length == 0)
-                reason = $"Video rejected (live stream, or longer than {maxDurationSeconds}s).";
+            // Turned down by the length/live filter: find out which, so the reason is clear.
+            if ((string.IsNullOrEmpty(reason) && lines.Length == 0) || reason.Contains("does not pass filter", StringComparison.OrdinalIgnoreCase))
+                throw await RejectedAsync(url, maxDurationSeconds, ct);
 
             if (RetryPolicy.IsBlockedByYouTube(reason))
             {
@@ -245,6 +246,35 @@ public sealed class YtDlp
 
         var (title, artist, track, seconds) = ParseInfo(lines[^2]);
         return new SongDownload(file, title, artist, track, seconds);
+    }
+
+    /// <summary>
+    /// Why the length/live filter turned a video down: a live stream, a premiere that hasn't started, or too long.
+    /// One quick extra look at the video, since yt-dlp only says the filter as a whole didn't pass.
+    /// </summary>
+    private async Task<SongRejectedException> RejectedAsync(string url, int maxDurationSeconds, CancellationToken ct)
+    {
+        var limit = RetryPolicy.Length(maxDurationSeconds);
+        try
+        {
+            var (exit, stdout, _) = await RunAsync(new[]
+            {
+                "--no-playlist", "--no-warnings", "--skip-download",
+                "--print", "%(duration)s\t%(live_status)s",
+                "--", url,
+            }, ct);
+            var p = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault()?.Split('\t');
+            if (exit == 0 && p is { Length: >= 2 })
+            {
+                if (p[1] == "is_live") return new SongRejectedException("it's a live stream");
+                if (p[1] == "is_upcoming") return new SongRejectedException("it's a premiere or stream that hasn't started yet");
+                if (double.TryParse(p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d)
+                    && d > maxDurationSeconds)
+                    return new SongRejectedException($"it's {RetryPolicy.Length((int)Math.Round(d))} long, and the limit is {limit}");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Plugin.Log.Debug(ex, $"Couldn't check why {url} was turned down"); }
+        return new SongRejectedException($"it's a live stream or longer than the {limit} limit");
     }
 
     /// <summary>A video's title and YouTube's artist/track fields, without downloading. Null if it can't be read.</summary>

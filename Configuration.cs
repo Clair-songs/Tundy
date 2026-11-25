@@ -123,6 +123,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Tell the requester where their song is in the queue. Off by default.</summary>
     public bool ReplyQueuePosition { get; set; } = false;
 
+    /// <summary>
+    /// Tell the requester why their song can't be played (private, removed, age-restricted, region, too long,
+    /// live...), so they can send another link. On by default, separate from the queue position replies.
+    /// </summary>
+    public bool ReplyWhyRejected { get; set; } = true;
+
     // ---- Downloads ----
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>

@@ -18,7 +18,15 @@ using Dalamud.Plugin.Services;
 
 namespace Tundy;
 
-public sealed record RequestLogEntry(DateTime Time, string Sender, string Link, string Outcome, bool Accepted);
+/// <param name="FailedId">For failures: the entry in Plugin.Failed this line can be retried from.</param>
+public sealed record RequestLogEntry(DateTime Time, string Sender, string Link, string Outcome, bool Accepted, Guid? FailedId = null);
+
+/// <summary>A request that couldn't be played, kept so it can be retried by hand.</summary>
+/// <param name="Song">The song, or null for a playlist that couldn't be read.</param>
+/// <param name="Playlist">The playlist, for a playlist that couldn't be read.</param>
+/// <param name="CanRetry">False when trying again can't help (private, removed, too long, ...).</param>
+public sealed record FailedRequest(Guid Id, DateTime At, string Sender, byte[]? EncodedSender, string Url, string Display,
+                                   string Reason, bool CanRetry, SongRequest? Song, PlaylistLink? Playlist, bool Shuffle);
 
 /// <param name="Elapsed">Null when the start time isn't known.</param>
 /// <param name="Source">"Music mod", "Lightless", "Tundy" or "Syncing".</param>
@@ -124,7 +132,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Importer = new ModImporter(PluginInterface, Framework, DataManager, YtDlp, Ffmpeg, Config);
         Sharer = new SongSharer(PluginInterface, DataManager, Framework, ObjectTable, Chat, Config, Music, Ffmpeg, Path.Combine(dir, "share"));
         Player = new MusicPlayer(YtDlp, Sharer, Path.Combine(dir, "cache"), Config, Notify,
-            (req, err) => AddLog(req.Sender, req.Url, $"Failed: {err}", false));
+            OnSongFailed);
         Player.TrackStarted += t => Announcer.SongStarted(t.Title, t.Request.Sender);
         Covers = new CoverArt(TextureProvider, Path.Combine(dir, "covers"));
         Honorific = new HonorificTitle(PluginInterface, Framework, ObjectTable, Config, () =>
@@ -147,7 +155,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(MainCommand, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open the Tundy control panel. Subcommands: mini, play <link>, skip, stop, approve [all], import, on, off, share, vol <0-100>, mute",
+            HelpMessage = "Open the Tundy control panel. Subcommands: mini, play <link>, skip, stop, retry, approve [all], import, on, off, share, vol <0-100>, mute",
         });
 
         Chat.ChatMessage += OnChatMessage;
@@ -321,13 +329,100 @@ public sealed partial class Plugin : IDalamudPlugin
         lock (requestLog) requestLog.Clear();
     }
 
-    private void AddLog(string sender, string link, string outcome, bool accepted)
+    private void AddLog(string sender, string link, string outcome, bool accepted, Guid? failedId = null)
     {
         lock (requestLog)
         {
-            requestLog.Add(new RequestLogEntry(DateTime.Now, sender, link, outcome, accepted));
+            requestLog.Add(new RequestLogEntry(DateTime.Now, sender, link, outcome, accepted, failedId));
             if (requestLog.Count > MaxLog) requestLog.RemoveAt(0);
         }
+    }
+
+    // ------------------------------------------------------------------ failed requests (Retry)
+
+    private const int MaxFailed = 20;
+    private readonly List<FailedRequest> failed = new();
+
+    /// <summary>Requests that couldn't be played, newest first.</summary>
+    public FailedRequest[] FailedSnapshot()
+    {
+        lock (failed) return failed.AsEnumerable().Reverse().ToArray();
+    }
+
+    /// <summary>Whether this failure is still in the list (it can be retried or dismissed).</summary>
+    public FailedRequest? FailedById(Guid id)
+    {
+        lock (failed) return failed.FirstOrDefault(f => f.Id == id);
+    }
+
+    private void RememberFailed(FailedRequest f)
+    {
+        lock (failed)
+        {
+            failed.Add(f);
+            if (failed.Count > MaxFailed) failed.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// A song that still failed after the automatic retries: log it, keep it for Retry, and (unless turned off) tell
+    /// the requester why when it can't ever play, so they can send another link.
+    /// </summary>
+    private void OnSongFailed(SongRequest req, string reason, bool canRetry)
+    {
+        var f = new FailedRequest(Guid.NewGuid(), DateTime.Now, req.Sender, req.EncodedSender, req.Url, req.Display, reason, canRetry, req, null, false);
+        RememberFailed(f);
+        AddLog(req.Sender, req.Url, $"Failed: {reason}", false, f.Id);
+        if (!canRetry && Config.ReplyWhyRejected && req.EncodedSender is { Length: > 0 } who)
+            Replier.Send(who, req.Sender, $"Sorry, your song can't be played: {reason}. Try another link.", always: true);
+    }
+
+    /// <summary>Tries a failed request again: a song goes in as the next song, a playlist is read again.</summary>
+    public bool Retry(Guid id)
+    {
+        FailedRequest? f;
+        lock (failed)
+        {
+            f = failed.FirstOrDefault(x => x.Id == id);
+            if (f == null || !f.CanRetry) return false;
+            failed.Remove(f);
+        }
+
+        if (f.Playlist != null)
+        {
+            HandlePlaylist(f.EncodedSender ?? Array.Empty<byte>(), f.Sender, f.Playlist, shuffle: f.Shuffle);
+        }
+        else if (f.Song is { } s)
+        {
+            // A fresh request (new id) with everything already known about the song.
+            Player.EnqueueNext(new SongRequest(s.Url, s.Sender, s.SpotifyId)
+            {
+                Track = s.Track,
+                Playlist = s.Playlist,
+                Title = s.Title,
+                Seconds = s.Seconds,
+                EncodedSender = s.EncodedSender,
+            });
+        }
+        AddLog(f.Sender, f.Url, "Retrying (by hand)", true);
+        Notify($"Trying {f.Sender}'s {(f.Playlist != null ? "playlist" : "song")} again.");
+        return true;
+    }
+
+    /// <summary>The newest failure that can be retried, if any.</summary>
+    public FailedRequest? LatestRetryable()
+    {
+        lock (failed) return failed.LastOrDefault(f => f.CanRetry);
+    }
+
+    public void DismissFailed(Guid id)
+    {
+        lock (failed) failed.RemoveAll(f => f.Id == id);
+    }
+
+    public void ClearFailed()
+    {
+        lock (failed) failed.Clear();
     }
 
     // ------------------------------------------------------------------ other plugins answering the same tells
@@ -702,7 +797,7 @@ public sealed partial class Plugin : IDalamudPlugin
             return;
         }
 
-        if (Player.TryEnqueue(new SongRequest(url, sender, spotifyId), force))
+        if (Player.TryEnqueue(new SongRequest(url, sender, spotifyId) { EncodedSender = sender == "You" ? null : encodedSender }, force))
         {
             AddLog(sender, url, sender == "You" ? "Queued (manual)" : approved ? "Approved and queued" : "Queued", true);
             Replier.Send(encodedSender, sender, replyStart + QueueReplier.Message(null, SongsBefore(alreadyQueued: true)));
@@ -752,6 +847,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 foreach (var s in picked)
                     Player.TryEnqueue(new SongRequest(s.YouTubeUrl ?? $"https://open.spotify.com/track/{s.Spotify!.Id}", sender, s.Spotify?.Id)
                     {
+                        EncodedSender = sender == "You" ? null : encodedSender,
                         Track = s.Spotify,
                         Playlist = contents.Name,
                         Title = string.IsNullOrWhiteSpace(s.Title) ? null : s.Title,
@@ -764,8 +860,12 @@ public sealed partial class Plugin : IDalamudPlugin
             catch (Exception ex)
             {
                 Log.Warning(ex, "Playlist failed");
-                AddLog(sender, link.Url, $"Failed: {ex.Message}", false);
-                Notify($"Couldn't read {sender}'s playlist: {ex.Message}");
+                var (reason, canRetry) = RetryPolicy.Explain(ex);
+                var failed = new FailedRequest(Guid.NewGuid(), DateTime.Now, sender, sender == "You" ? null : encodedSender, link.Url,
+                    $"Playlist {link.Url}", reason, canRetry, null, link, shuffle);
+                RememberFailed(failed);
+                AddLog(sender, link.Url, $"Failed: {reason}", false, failed.Id);
+                Notify($"Couldn't read {sender}'s playlist: {reason}.");
             }
         });
     }
@@ -795,7 +895,7 @@ public sealed partial class Plugin : IDalamudPlugin
                     if (sender != "You") RememberPlaylist(sender, DateTime.UtcNow);
                     HandlePlaylist(encodedSender, sender, link, replyStart, shuffle);
                 }
-                else if (Player.TryEnqueue(new SongRequest(url, sender, id), force))
+                else if (Player.TryEnqueue(new SongRequest(url, sender, id) { EncodedSender = sender == "You" ? null : encodedSender }, force))
                 {
                     AddLog(sender, url, sender == "You" ? "Queued (manual)" : "Queued", true);
                     Replier.Send(encodedSender, sender, replyStart + QueueReplier.Message(null, SongsBefore(alreadyQueued: true)));
@@ -1056,6 +1156,12 @@ public sealed partial class Plugin : IDalamudPlugin
             case "stop":
                 Player.Stop();
                 Chat.Print("[Tundy] Stopped and cleared the queue.");
+                break;
+            case "retry":
+                if (LatestRetryable() is { } last && Retry(last.Id))
+                    Chat.Print($"[Tundy] Trying {last.Sender}'s {(last.Playlist != null ? "playlist" : "song")} again: it plays next.");
+                else
+                    Chat.Print("[Tundy] Nothing to retry: no failed song that trying again could fix.");
                 break;
             case "approve":
                 var pending = Pending.Snapshot();

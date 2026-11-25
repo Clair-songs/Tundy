@@ -418,6 +418,9 @@ public sealed partial class MainWindow : Window
         ImGui.EndGroup();
         Ui.EndCard();
 
+        // A song that couldn't play and can be retried (only when there is one)
+        DrawFailedNotice();
+
         // Approvals card (only when someone waits)
         DrawPendingSection();
 
@@ -993,6 +996,8 @@ public sealed partial class MainWindow : Window
             ImGui.EndTable();
         }
 
+        DrawFailedSection();
+
         ImGui.Spacing();
         DrawAddLink("queue");
 
@@ -1000,6 +1005,71 @@ public sealed partial class MainWindow : Window
             DrawHistoryTab();
         if (Ui.Group("Requests log###requestslog"))
             DrawRequestsTab();
+    }
+
+    /// <summary>Songs and playlists that couldn't be played (only shown when there are any), with Retry.</summary>
+    private void DrawFailedSection()
+    {
+        var list = plugin.FailedSnapshot();
+        if (list.Length == 0) return;
+
+        ImGui.Spacing();
+        Ui.BeginCard();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextColored(Theme.Warn, $"COULDN'T PLAY ({list.Length})");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Clear")) plugin.ClearFailed();
+        Ui.Tooltip("Forget all of these. Nothing is sent to anyone.");
+
+        foreach (var f in list)
+        {
+            ImGui.PushID(f.Id.ToString());
+            ImGui.Separator();
+            ImGui.TextUnformatted(f.Display);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{f.Url}\nClick to copy the link");
+            if (ImGui.IsItemClicked()) ImGui.SetClipboardText(f.Url);
+            ImGui.TextColored(Theme.Muted, $"from {f.Sender} · {Ui.Ago(f.At)} · {f.Reason}");
+            if (f.CanRetry)
+            {
+                if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Redo, "Retry")) plugin.Retry(f.Id);
+                Ui.Tooltip(f.Playlist != null ? "Read the playlist again." : "Try again: it goes in as the next song, still for the same person.");
+                ImGui.SameLine();
+            }
+            else
+            {
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextColored(Theme.Muted, "Can't be fixed by retrying.");
+                ImGui.SameLine();
+            }
+            if (Ui.IconButton("dismiss", FontAwesomeIcon.Times, "Remove from this list")) plugin.DismissFailed(f.Id);
+            ImGui.PopID();
+        }
+        Ui.EndCard();
+    }
+
+    /// <summary>On Now playing: the newest song that failed and can be retried, with a Retry button.</summary>
+    private void DrawFailedNotice()
+    {
+        if (plugin.LatestRetryable() is not { } f) return;
+        var count = plugin.FailedSnapshot().Length;
+        Ui.BeginCard();
+        ImGui.PushFont(UiBuilder.IconFont);
+        ImGui.TextColored(Theme.Warn, FontAwesomeIcon.ExclamationTriangle.ToIconString());
+        ImGui.PopFont();
+        ImGui.SameLine();
+        ImGui.TextUnformatted(count == 1 ? $"{f.Sender}'s song couldn't play: {f.Reason}." : $"{count} songs couldn't play. Newest: {f.Sender}'s, {f.Reason}.");
+        ImGui.PushID("failedNotice");
+        if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Redo, "Retry")) plugin.Retry(f.Id);
+        Ui.Tooltip($"Try \"{f.Display}\" again as the next song.");
+        if (count > 1)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("See all")) page = Page.Queue;
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Dismiss")) plugin.DismissFailed(f.Id);
+        ImGui.PopID();
+        Ui.EndCard();
     }
 
     private void SpecialRow(string tag, SongRequest r, string state, bool allowRemove)
@@ -1182,6 +1252,12 @@ public sealed partial class MainWindow : Window
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(e.Link + "\nClick to copy");
             if (ImGui.IsItemClicked()) ImGui.SetClipboardText(e.Link);
             ImGui.TableNextColumn();
+            if (e.FailedId is { } fid && plugin.FailedById(fid) is { CanRetry: true })
+            {
+                if (Ui.IconButton("retry", FontAwesomeIcon.Redo, "Retry: it goes in as the next song, still for the same person."))
+                    plugin.Retry(fid);
+                ImGui.SameLine();
+            }
             ImGui.TextColored(e.Accepted ? Theme.Good : Theme.Bad, e.Outcome);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(e.Outcome);
             ImGui.PopID();
@@ -1547,6 +1623,11 @@ public sealed partial class MainWindow : Window
         if (ImGui.Checkbox("Tell people where their song is in the queue", ref reply)) { cfg.ReplyQueuePosition = reply; changed = true; }
         Ui.Help("After a request is accepted, sends that person a tell like: \"Your song is in the queue. 3 songs play before it.\" "
                 + "It uses /tell Name@World to reach exactly that person; /r could reach whoever messaged you last instead.");
+        var why = cfg.ReplyWhyRejected;
+        if (ImGui.Checkbox("Tell people why their song can't be played", ref why)) { cfg.ReplyWhyRejected = why; changed = true; }
+        Ui.Help("When a video can never play (private, removed, age-restricted, not available in this region, too long, "
+                + "a live stream...), sends that person a tell like: \"Sorry, your song can't be played: it's a private video. "
+                + "Try another link.\" On even when the queue position replies above are off.");
         ImGui.PushTextWrapPos();
         ImGui.TextDisabled("Also tells people when their request waits for your approval, was approved or rejected, or is already in the queue.");
         if (reply) ImGui.TextDisabled(plugin.Replier.LastResult);
@@ -1726,7 +1807,7 @@ public sealed partial class MainWindow : Window
 
         if (Ui.Group("Chat commands"))
         {
-        ImGui.TextDisabled("/tundy  ·  mini  ·  play <link>  ·  skip  ·  stop  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
+        ImGui.TextDisabled("/tundy  ·  mini  ·  play <link>  ·  skip  ·  stop  ·  retry  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
 
         }
 

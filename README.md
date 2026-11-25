@@ -190,6 +190,14 @@ Send a playlist like a song: `!q <playlist link>`.
   IPv4 and keeps using IPv4 for the rest of the session. If YouTube still refuses, Tundy waits a moment and tries gently: one
   piece of the song at a time instead of four, with longer waits between yt-dlp's own retries. When that works, it keeps
   downloading gently for the rest of the session.
+- When a song can't be played, Tundy says why in plain words: a private video, removed, age-restricted, not available in
+  this region, too long (with its length and the limit), a live stream, a premiere that hasn't started, members-only, or no
+  matching song on YouTube. By default the requester gets a tell too ("Sorry, your song can't be played: it's a private
+  video. Try another link."); turn that off in Settings → Reply to requesters.
+- **Retry by hand:** songs and playlists that still failed after the automatic retries stay in a **Couldn't play** list on
+  the Queue tab, with **Retry** (it goes in as the next song, still for the same person). Now playing shows the newest one,
+  failed lines in the Requests log get a retry button, and `/tundy retry` retries the newest. Videos that can never play
+  (private, removed, too long...) say so instead of offering Retry.
 
 ## Song as your title (Honorific)
 With the [Honorific](https://github.com/Caraxi/Honorific) plugin installed, Settings → Song as your title can show the
@@ -233,7 +241,7 @@ on small status dots), or **Dalamud's own look**. The mini player and the welcom
 progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing
 window, or right-click the window): cover, name, a thin time bar, skip and the next song, without a title bar.
 
-Chat commands: `/tundy mini | play <link> | skip | stop | approve [all] | import | on | off | share | mute | vol 0-100`
+Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
 
 ## Sharing Tundy with other people
 `dotnet build -c Release` makes `bin\Release\Tundy\latest.zip` (the plugin and everything it needs) and

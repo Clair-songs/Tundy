@@ -35,6 +35,9 @@ public sealed record SongRequest(string Url, string Sender, string? SpotifyId = 
     public string? VideoId { get; set; }
 
     public string? CoverId => VideoId ?? RetryPolicy.YouTubeId(Url);
+
+    /// <summary>The requester as the game sent it, for replying by tell (null for songs you added yourself).</summary>
+    public byte[]? EncodedSender { get; init; }
 }
 
 /// <param name="ScdPath">Game sound file for sharing through Lightless, or null if not shared.</param>
@@ -57,7 +60,7 @@ public sealed class MusicPlayer : IDisposable
     private volatile bool skipRequested;
     private readonly Configuration config;
     private readonly Action<string> notify;
-    private readonly Action<SongRequest, string> onFailed;
+    private readonly Action<SongRequest, string, bool> onFailed; // request, reason, whether retrying could help
 
     private readonly object queueLock = new();
     private readonly List<SongRequest> queue = new();
@@ -87,7 +90,7 @@ public sealed class MusicPlayer : IDisposable
     /// <summary>True between applying a shared song and it starting (waiting for Lightless to sync).</summary>
     public bool WaitingForSync { get; private set; }
 
-    public MusicPlayer(YtDlp ytDlp, SongSharer sharer, string cacheDir, Configuration config, Action<string> notify, Action<SongRequest, string> onFailed)
+    public MusicPlayer(YtDlp ytDlp, SongSharer sharer, string cacheDir, Configuration config, Action<string> notify, Action<SongRequest, string, bool> onFailed)
     {
         this.ytDlp = ytDlp;
         this.sharer = sharer;
@@ -275,6 +278,19 @@ public sealed class MusicPlayer : IDisposable
         signal.Release();
         LookUpTitle(req);
         Skip();
+    }
+
+    /// <summary>Puts a song first in the queue (after the current one), ignoring the queue limit. Used by Retry.</summary>
+    public void EnqueueNext(SongRequest req)
+    {
+        lock (queueLock)
+            ReorderLocked(all =>
+            {
+                all.Insert(0, req);
+                return all;
+            });
+        signal.Release();
+        LookUpTitle(req);
     }
 
     public void Shuffle()
@@ -529,8 +545,9 @@ public sealed class MusicPlayer : IDisposable
         catch (Exception ex)
         {
             Plugin.Log.Warning(ex, $"Download failed for {req.Url}");
-            onFailed(req, RetryPolicy.Short(ex.Message));
-            notify($"Could not play request from {req.Sender}: {RetryPolicy.Short(ex.Message)}");
+            var (reason, canRetry) = RetryPolicy.Explain(ex);
+            onFailed(req, reason, canRetry);
+            notify($"Couldn't play {req.Sender}'s song: {reason}.");
             return null;
         }
     }
@@ -565,7 +582,7 @@ public sealed class MusicPlayer : IDisposable
                 if (keep) library.Save(videoId!, title, song.File);
                 return (song.File, title);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && attempt < retries && RetryPolicy.IsRetryable(ex.Message))
+            catch (Exception ex) when (ex is not OperationCanceledException && attempt < retries && RetryPolicy.IsRetryable(ex))
             {
                 var reason = RetryPolicy.Short(ex.Message);
                 Plugin.Log.Warning($"Download failed for {target} (try {attempt + 1}/{retries + 1}): {reason}");
