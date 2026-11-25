@@ -116,43 +116,30 @@ public sealed partial class MainWindow : Window
             return list;
         }
 
+        // Sharing problems say what's wrong; the fix buttons live in one place, the setup steps at the top of the
+        // Sharing tab (and the Music mod section), and the banner just opens it.
+        const string open = "Open the Sharing setup";
         if (sharer.UsesMusicMod)
         {
             var setup = plugin.Music.SetupProblems();
             if (setup.Count > 0)
-            {
-                var music = plugin.Music;
-                var canSetUp = music.IsRecommended && music.State().Installed;
-                var other = !music.State().Installed && music.IsRecommended ? music.InstalledMega() : null;
-                if (other != null)
-                    list.Add(new Problem("The music mod needs setting up", setup[0], "Use it", () =>
-                    {
-                        cfg.QueueTargetMod = other;
-                        music.Recheck();
-                        plugin.SaveConfig();
-                    }));
-                else
-                    list.Add(new Problem("The music mod needs setting up", setup[0],
-                        canSetUp ? "Set it up for me" : "Open Sharing",
-                        canSetUp ? () => megaSetupResult = music.SetUp() : OpenHowItPlays));
-            }
+                list.Add(new Problem("The music mod needs setting up", setup[0], open, OpenMusicMod));
 
             if (plugin.Ffmpeg.CurrentPath == null)
                 list.Add(new Problem("ffmpeg isn't installed",
                     plugin.Ffmpeg.Downloading ? plugin.Ffmpeg.Status : "The music mod needs it to convert songs (about 120 MB, once).",
-                    plugin.Ffmpeg.Downloading ? null : "Install ffmpeg",
-                    () => _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { })));
+                    plugin.Ffmpeg.Downloading ? null : open, () => page = Page.Sharing));
         }
 
         if (sharer.EmoteOwned() == false)
             list.Add(new Problem($"Your character hasn't learned {sharer.Emote.Command}",
                 sharer.UsesMusicMod
-                    ? $"The music mod's dance plays the songs, and it's on {sharer.Emote.Command}. Learn that emote, or put the dance on one you have."
-                    : $"The songs play when your character does {sharer.Emote.Command}. Learn it, or pick another emote in Sharing.",
-                "Open Sharing", OpenHowItPlays));
+                    ? $"The music mod's dance plays the songs, and it's on {sharer.Emote.Command}. Learn that emote, or pick a dance on one you have."
+                    : $"The songs play when your character does {sharer.Emote.Command}. Learn it, or pick another emote.",
+                open, sharer.UsesMusicMod ? OpenMusicMod : OpenHowItPlays));
 
         if (sharer.HasChecked && !sharer.LastCheckOk && !plugin.SoundyQHoldsSongSlot)
-            list.Add(new Problem("The last song didn't play for others", sharer.LastCheck, "Open Sharing", () => page = Page.Sharing));
+            list.Add(new Problem("The last song didn't play for others", sharer.LastCheck, open, () => page = Page.Sharing));
 
         return list;
     }
@@ -556,15 +543,21 @@ public sealed partial class MainWindow : Window
         {
         ImGui.TextUnformatted("How the song plays in game:");
         var target = cfg.ShareTarget;
-        if (ImGui.RadioButton("Through a music mod's DJ dance (recommended, like SoundyQ)", ref target, 0)) { cfg.ShareTarget = 0; changed = true; }
-        Ui.Help("The music mod (Yue & Lu's Mega Music Mod) plays one sound file during its dance. Tundy puts the song on that "
-                + "file while it plays. The music mod itself isn't changed.");
+        if (ImGui.RadioButton("Through a music mod's dance (recommended, like SoundyQ)", ref target, 0)) { cfg.ShareTarget = 0; changed = true; }
+        Ui.Help("A music mod (the Mega Music Mod, or another dance mod) plays a sound file during its dance. Tundy puts the "
+                + "song on that file while it plays. The music mod itself isn't changed. Pick the mod in the Music mod section below.");
         if (ImGui.RadioButton("On one emote's own sound", ref target, 1)) { cfg.ShareTarget = 1; changed = true; }
         Ui.Help("Works without any music mod: the song replaces an emote's normal sound while it plays.");
 
         var current = sharer.Emote;
         if (sharer.UsesMusicMod)
-            changed |= DrawMusicModSection();
+        {
+            // Only a summary here: the music mod, its song file and emote are chosen in one place (Music mod below).
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(Theme.Muted, $"Music mod: \"{cfg.QueueTargetMod}\" · song file {string.Join(", ", plugin.Music.Routes)} · "
+                                           + $"emote {current.Command}. Change it under Music mod below.");
+            ImGui.PopTextWrapPos();
+        }
         else
             changed |= DrawEmoteChoice(current);
 
@@ -580,6 +573,14 @@ public sealed partial class MainWindow : Window
             Ui.Help("Quiet: Tundy keeps silence on the song slot between requests. The music mod's song: what you picked in "
                     + "the mod (for example a song added in the Import tab) plays whenever you dance. Applies after the next song.");
         }
+        }
+
+        if (sharer.UsesMusicMod)
+        {
+            if (openMusicMod) ImGui.SetNextItemOpen(true);
+            openMusicMod = false;
+            if (Ui.Group("Music mod"))
+                changed |= DrawMusicModGroup();
         }
 
         if (Ui.Group("Starting songs"))
@@ -609,10 +610,6 @@ public sealed partial class MainWindow : Window
         Ui.Help(sharer.UsesMusicMod
             ? "Music mod songs are stereo Vorbis: about 1.2 MB per minute of music, or about 0.7 MB smaller. Applies to songs downloaded after you change it."
             : "Normal: about 1.4 MB per minute of music. Smaller: about 0.7 MB. Applies to songs downloaded after you change it.");
-        if (sharer.UsesMusicMod && plugin.Ffmpeg.CurrentPath == null)
-            ImGui.TextColored(Theme.Warn, plugin.Ffmpeg.Downloading
-                ? plugin.Ffmpeg.Status
-                : "ffmpeg isn't installed yet: the music mod needs it. It downloads with the first song, or in Settings → Download tools.");
 
         ImGui.Spacing();
         if (ImGui.Button($"Do {sharer.Emote.Command} now"))
@@ -693,8 +690,7 @@ public sealed partial class MainWindow : Window
                     var other = !music.State().Installed && music.IsRecommended ? music.InstalledMega() : null;
                     if (other != null && ImGui.Button($"Use \"{other}\""))
                     {
-                        cfg.QueueTargetMod = other;
-                        music.Recheck();
+                        music.UseMod(other);
                         changed = true;
                     }
                     else if (problems.Count > 0 && music.IsRecommended && music.State().Installed && ImGui.Button("Set it up for me"))
@@ -702,7 +698,7 @@ public sealed partial class MainWindow : Window
                     else if (problems.Count == 0 && !ffmpeg && !plugin.Ffmpeg.Downloading && ImGui.Button("Install ffmpeg"))
                         _ = plugin.Ffmpeg.DownloadAsync(default).ContinueWith(_ => { });
                     else if (!inGuide && (problems.Count > 0 || owned == false) && ImGui.Button("Show the music mod settings"))
-                        openHowItPlays = true;
+                        openMusicMod = true;
                     if (megaSetupResult.Length > 0) ImGui.TextDisabled(megaSetupResult);
                 });
             }
@@ -738,70 +734,239 @@ public sealed partial class MainWindow : Window
         return false; // already saved
     }
 
-    /// <summary>The music mod, its song slot and its emote. Returns true if a setting changed.</summary>
-    private bool DrawMusicModSection()
+    private string otherModFilter = string.Empty;
+    private string otherModResult = string.Empty;
+    private string modSearch = string.Empty;
+    private bool openMusicMod;
+
+    /// <summary>Opens the Sharing tab with the Music mod section unfolded.</summary>
+    private void OpenMusicMod()
+    {
+        page = Page.Sharing;
+        openMusicMod = true;
+    }
+
+    /// <summary>
+    /// The one place to choose the music mod, and its song file and emote: for the Mega Music Mod its own setup; for
+    /// any other mod a scan of its dances (follow the one on in Penumbra, or pick one), or by hand. Returns true if a
+    /// setting changed.
+    /// </summary>
+    private bool DrawMusicModGroup()
     {
         var cfg = plugin.Config;
         var music = plugin.Music;
         var changed = false;
-        Ui.Section("Music mod");
-
-        ImGui.PushTextWrapPos();
-        var problems = music.SetupProblems();
-        if (problems.Count == 0)
-            ImGui.TextColored(Theme.Good, $"\"{cfg.QueueTargetMod}\" is on. Songs play through its DJ dance on {MegaMusicMod.SafeEmote(cfg.QueueEmoteCommand)}.");
-        else
-            foreach (var p in problems) ImGui.TextColored(Theme.Warn, p);
-        ImGui.PopTextWrapPos();
-
-        if (music.IsRecommended && music.State().Installed)
-        {
-            if (ImGui.Button("Set up Mega Music Mod for me"))
-                megaSetupResult = music.SetUp();
-            Ui.Tooltip("Turns the mod on in your Penumbra collection, picks its \"Dj (Cheer Jump)\" dance and the DJ deck for your race.");
-            if (megaSetupResult.Length > 0)
-            {
-                ImGui.PushTextWrapPos();
-                ImGui.TextDisabled(megaSetupResult);
-                ImGui.PopTextWrapPos();
-            }
-        }
+        var scale = ImGuiHelpers.GlobalScale;
 
         // Which mod
-        ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
-        if (ImGui.BeginCombo("Music mod", cfg.QueueTargetMod))
+        ImGui.SetNextItemWidth(320 * scale);
+        var modItems = music.ModList().Where(m => !m.Key.Equals("Tundy Song", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(m => (m.Key, m.Value == m.Key ? m.Value : $"{m.Value} ({m.Key})"));
+        if (Ui.SearchCombo("Mod##musicMod", cfg.QueueTargetMod, cfg.QueueTargetMod, modItems, ref modSearch, out var pickedMod, "Search your mods")
+            && pickedMod != cfg.QueueTargetMod)
         {
-            foreach (var (folder, name) in music.ModList().OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase))
-            {
-                if (ImGui.Selectable(name == folder ? name : $"{name} ({folder})", folder == cfg.QueueTargetMod))
-                {
-                    cfg.QueueTargetMod = folder;
-                    scannedRoutes = null;
-                    music.Recheck();
-                    changed = true;
-                }
-            }
-            ImGui.EndCombo();
+            music.UseMod(pickedMod!);
+            scannedRoutes = null;
+            otherModResult = string.Empty;
+            changed = true;
         }
-        Ui.Help("The Penumbra mod whose dance plays the song. Default: [Yue & Lu's] Mega Music Mod.");
-        if (!music.IsRecommended)
+        Ui.Help("The Penumbra mod whose dance plays the songs: the Mega Music Mod (recommended), or any other dance or music mod.");
+        if (!music.IsRecommended && music.InstalledMega() is { } mega)
         {
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Use {music.PreferredMega}"))
+            if (ImGui.SmallButton("Use Mega Music Mod"))
             {
-                cfg.QueueTargetMod = music.PreferredMega;
+                music.UseMod(mega);
                 scannedRoutes = null;
-                music.Recheck();
                 changed = true;
             }
         }
 
-        // Which sound file(s)
-        ImGui.TextUnformatted($"Song slot: {string.Join(", ", music.Routes)}");
+        // The Mega Music Mod: its own setup (the DJ dance and deck), its slot and emote by hand if wanted.
+        if (music.IsRecommended)
+        {
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(music.SetupProblems().Count == 0 ? Theme.Good : Theme.Warn, music.SetupProblems().Count == 0
+                ? $"Songs play through its DJ dance on {MegaMusicMod.SafeEmote(cfg.QueueEmoteCommand)}, from {string.Join(", ", music.Routes)}."
+                : "It needs setting up: see the steps at the top of this tab, or use the button below.");
+            ImGui.PopTextWrapPos();
+            if (music.State().Installed)
+            {
+                if (ImGui.Button("Set up Mega Music Mod for me")) megaSetupResult = music.SetUp();
+                Ui.Tooltip("Turns the mod on in your Penumbra collection, picks its \"Dj (Cheer Jump)\" dance and the DJ deck for your race.");
+                if (megaSetupResult.Length > 0)
+                {
+                    ImGui.PushTextWrapPos();
+                    ImGui.TextDisabled(megaSetupResult);
+                    ImGui.PopTextWrapPos();
+                }
+            }
+            if (ImGui.TreeNode("Song file and emote by hand##megaHand"))
+            {
+                changed |= DrawManualSlot();
+                ImGui.TreePop();
+            }
+            return changed;
+        }
+
+        // Another mod: read its dances.
+        var scan = music.Scan;
+        if (scan == null && !music.Scanning) music.StartScan();
+        if (music.Scanning)
+        {
+            ImGui.TextColored(Theme.Info, "Scanning the mod's dances... (big mods can take half a minute)");
+            return changed;
+        }
+        ImGui.TextColored(Theme.Muted, music.ScanStatus);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Scan again")) music.StartScan();
+        Ui.Tooltip("Read the mod again, for example after it was updated.");
+
+        var hasDances = scan is { Songs.Count: > 0 };
+        if (!hasDances)
+        {
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(Theme.Warn, "Tundy found no dance in this mod that plays a song file of its own. Pick its song file "
+                                          + "and emote by hand below.");
+            ImGui.PopTextWrapPos();
+            return changed | DrawManualSlot();
+        }
+
+        // Follow, pick, or by hand
+        ImGui.Spacing();
+        var mode = cfg.OtherModByHand ? 2 : cfg.OtherModFollow ? 0 : 1;
+        var modeChanged = ImGui.RadioButton("Use the dance that's turned on in Penumbra", ref mode, 0);
+        modeChanged |= ImGui.RadioButton("Always use the dance I pick below", ref mode, 1);
+        modeChanged |= ImGui.RadioButton("Song file and emote by hand", ref mode, 2);
+        if (modeChanged)
+        {
+            cfg.OtherModFollow = mode == 0;
+            cfg.OtherModByHand = mode == 2;
+            music.Recheck();
+            changed = true;
+        }
+        Ui.Help("Turned on in Penumbra: when you switch dances in Penumbra, Tundy switches with it (checked every few seconds). "
+                + "Picked: always the same dance. By hand: you choose the song file(s) and the emote, and Tundy doesn't change them.");
+
+        if (cfg.OtherModByHand)
+            return changed | DrawManualSlot();
+
+        ImGui.PushTextWrapPos();
+        if (music.CurrentDance is { } now)
+            ImGui.TextColored(Theme.Good, $"Now: \"{now.Option}\". Songs go on {now.Route}"
+                                          + (now.Emote is { } ne ? $", played by {ne.Command} ({ne.Name})." : "; its emote isn't known, so pick \"by hand\" to set it."));
+        else
+            ImGui.TextColored(Theme.Warn, cfg.OtherModFollow
+                ? "None of the dances below is turned on in Penumbra. Click \"Set up\" on the one you want."
+                : "Pick a dance below with \"Use\", or \"Set up\" to also turn it on in Penumbra.");
+        if (otherModResult.Length > 0) ImGui.TextDisabled(otherModResult);
+        ImGui.PopTextWrapPos();
+
+        // Filter
+        ImGui.SetNextItemWidth(200 * scale);
+        ImGui.InputTextWithHint("##otherFilter", "Search dances or emotes", ref otherModFilter, 64);
+        ImGui.SameLine();
+        var effects = cfg.OtherModShowEffects;
+        var effectCount = scan!.Songs.Count(d => !d.IsMusic);
+        if (ImGui.Checkbox($"Show sound effects too ({effectCount})", ref effects)) { cfg.OtherModShowEffects = effects; changed = true; }
+        Ui.Help("Some dances play a long sound effect (voices, noises) instead of music. Songs can go there too: Tundy builds them "
+                + "in that format (mono). They're hidden unless you need them.");
+
+        var rows = scan.Songs
+            .Where(d => cfg.OtherModShowEffects || d.IsMusic)
+            .Where(d => otherModFilter.Length == 0
+                        || d.Label.Contains(otherModFilter, StringComparison.OrdinalIgnoreCase)
+                        || (d.Emote?.Command.Contains(otherModFilter, StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (d.Emote?.Name.Contains(otherModFilter, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderByDescending(d => d.IsMusic).ThenBy(d => d.Group).ThenBy(d => d.Option)
+            .ToList();
+
+        var rowH = ImGui.GetFrameHeight() + ImGui.GetStyle().CellPadding.Y * 2;
+        var height = Math.Clamp(rows.Count, 3, 10) * rowH + ImGui.GetFrameHeightWithSpacing();
+        if (ImGui.BeginTable("otherDances", 5,
+                ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.Resizable,
+                new Vector2(0, height)))
+        {
+            ImGui.TableSetupScrollFreeze(0, 1);
+            ImGui.TableSetupColumn("Dance", ImGuiTableColumnFlags.WidthStretch, 3);
+            ImGui.TableSetupColumn("Emote", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+            ImGui.TableSetupColumn("Song file", ImGuiTableColumnFlags.WidthStretch, 2);
+            ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed, 80 * scale);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 110 * scale);
+            ImGui.TableHeadersRow();
+
+            foreach (var d in rows)
+            {
+                ImGui.PushID(d.Key);
+                ImGui.TableNextRow();
+                var isNow = music.CurrentDance?.Key == d.Key;
+                ImGui.TableNextColumn();
+                ImGui.AlignTextToFramePadding();
+                if (isNow) ImGui.TextColored(Theme.Good, d.Option);
+                else ImGui.TextUnformatted(d.Option);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{d.Option}\nin \"{d.Group}\"");
+                ImGui.TableNextColumn();
+                ImGui.AlignTextToFramePadding();
+                if (d.Emote is { } e) { ImGui.TextUnformatted(e.Command); Ui.Tooltip(e.Name); }
+                else { ImGui.TextDisabled("unknown"); Ui.Tooltip("Its animation isn't one of the game's emotes; set the emote with \"by hand\"."); }
+                ImGui.TableNextColumn();
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextDisabled(d.Route);
+                Ui.Tooltip($"{d.Route}\n{d.FileBytes / 1024} KB in the mod");
+                ImGui.TableNextColumn();
+                ImGui.AlignTextToFramePadding();
+                if (d.IsMusic) ImGui.TextUnformatted("music");
+                else ImGui.TextColored(Theme.Warn, "effect");
+                Ui.Tooltip(d.IsMusic ? "Streamed music, like the Mega Music Mod's songs." : "A sound effect: songs are built as mono sound effects to match.");
+                ImGui.TableNextColumn();
+                if (ImGui.SmallButton("Use"))
+                {
+                    cfg.OtherModDance = d.Key;
+                    cfg.OtherModFollow = false;
+                    cfg.OtherModByHand = false;
+                    music.Recheck();
+                    otherModResult = $"Using \"{d.Option}\".";
+                    changed = true;
+                }
+                Ui.Tooltip("Always use this dance (it still has to be on in Penumbra to play: \"Set up\" does that).");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Set up"))
+                {
+                    cfg.OtherModByHand = false;
+                    otherModResult = music.SetUpDance(d);
+                    changed = true;
+                }
+                Ui.Tooltip("Turn the mod and this dance on in your Penumbra collection, and use it.");
+                ImGui.PopID();
+            }
+            if (rows.Count == 0)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.TextDisabled(otherModFilter.Length > 0 ? "No dance matches the search." : "Only sound effects found: tick \"Show sound effects too\".");
+            }
+            ImGui.EndTable();
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// The song file(s) and emote set by hand: the mod's sound files (most used first) to tick, and the emote. Used
+    /// for the Mega Music Mod's advanced settings, the "by hand" choice, and mods without a dance Tundy can find.
+    /// Returns true if a setting changed.
+    /// </summary>
+    private bool DrawManualSlot()
+    {
+        var cfg = plugin.Config;
+        var music = plugin.Music;
+        var changed = false;
+
+        ImGui.TextUnformatted($"Song file(s): {string.Join(", ", music.Routes)}");
         Ui.Help("The game sound file the dance plays. For the Mega Music Mod it's sound/lolo.scd.");
         ImGui.SameLine();
-        if (ImGui.SmallButton("Scan the mod")) scannedRoutes = music.ScanRoutes();
-        Ui.Tooltip("Lists the sound files this mod uses, most used first. The song slot is usually the top one.");
+        if (ImGui.SmallButton("List the mod's sound files")) scannedRoutes = music.ScanRoutes();
+        Ui.Tooltip("Lists the sound files this mod uses, most used first. The song file is usually the top one.");
         if (scannedRoutes != null)
         {
             if (scannedRoutes.Count == 0) ImGui.TextDisabled("No sound files found in this mod.");
@@ -813,21 +978,22 @@ public sealed partial class MainWindow : Window
                 {
                     if (on) cfg.QueueScdRoutes.Add(route);
                     else cfg.QueueScdRoutes.RemoveAll(r => r.Equals(route, StringComparison.OrdinalIgnoreCase));
+                    music.Recheck();
                     changed = true;
                 }
             }
             ImGui.EndChild();
         }
-        if (!cfg.QueueScdRoutes.Contains(MegaMusicMod.RecommendedRoute, StringComparer.OrdinalIgnoreCase) && music.IsRecommended)
+        if (music.IsRecommended && !cfg.QueueScdRoutes.Contains(MegaMusicMod.RecommendedRoute, StringComparer.OrdinalIgnoreCase))
         {
             if (ImGui.SmallButton($"Use {MegaMusicMod.RecommendedRoute}"))
             {
                 cfg.QueueScdRoutes = new List<string> { MegaMusicMod.RecommendedRoute };
+                music.Recheck();
                 changed = true;
             }
         }
 
-        // Which emote
         var emote = cfg.QueueEmoteCommand;
         ImGui.SetNextItemWidth(160 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputText("Emote that plays it", ref emote, 32))
@@ -839,7 +1005,6 @@ public sealed partial class MainWindow : Window
                 + "Done once when each song starts, without a chat message.");
         if (MegaMusicMod.SafeEmote(emote) != emote.Trim().ToLowerInvariant())
             ImGui.TextColored(Theme.Warn, $"That isn't a plain emote command; {MegaMusicMod.RecommendedEmote} is used instead.");
-
         return changed;
     }
 

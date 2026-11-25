@@ -211,6 +211,14 @@ public sealed class SongSharer : IDisposable
         lock (loadLock) return otherLoads.TryGetValue(gamePath, out var t) && t >= since;
     }
 
+    // A song can sit on several sound files (a music mod's song slots); it counts as loaded when any of them did. Only
+    // looking at the first one reported failures for songs that played fine from another slot.
+    private bool SongLoadedForPlayerSince(ShareEmote emote, DateTime since) =>
+        (emote.Routes ?? new[] { emote.ScdPath }).Any(r => LoadedForPlayerSince(r, since));
+
+    private bool SongLoadedForOtherSince(ShareEmote emote, DateTime since) =>
+        (emote.Routes ?? new[] { emote.ScdPath }).Any(r => LoadedForOtherSince(r, since));
+
     /// <summary>
     /// Whether Lightless has already learned this emote's sound file for your character. Lightless saves the
     /// emote/sound files it has seen your character use in its transient.json; until then it doesn't send them.
@@ -265,7 +273,7 @@ public sealed class SongSharer : IDisposable
             await DelayAsync(2, skipRequested, ct); // let the redraw finish
             var primedAt = DateTime.Now;
             await PerformEmoteAsync(emote);
-            await WaitForAsync(() => LoadedForPlayerSince(emote.ScdPath, primedAt), 6, skipRequested, ct);
+            await WaitForAsync(() => SongLoadedForPlayerSince(emote, primedAt), 6, skipRequested, ct);
             ReportLoad(emote, primedAt, priming: true);
             await DelayAsync(8, skipRequested, ct); // Lightless waits 5 s after a new file, then saves it
             Plugin.Log.Information($"Lightless knows the sound now: {LightlessKnows(emote)}");
@@ -310,7 +318,7 @@ public sealed class SongSharer : IDisposable
             await PerformEmoteAsync(emote);
             Status = $"Playing for nearby Lightless pairs ({emote.Command})";
         }
-        await WaitForAsync(() => LoadedForPlayerSince(emote.ScdPath, startedAt), 5, () => false, ct);
+        await WaitForAsync(() => SongLoadedForPlayerSince(emote, startedAt), 5, () => false, ct);
         ReportLoad(emote, startedAt, priming: false);
     }
 
@@ -336,7 +344,7 @@ public sealed class SongSharer : IDisposable
             await Task.Delay(2000); // let the redraw finish
             var since = DateTime.Now;
             await PerformEmoteAsync(emote);
-            await WaitForAsync(() => LoadedForPlayerSince(emote.ScdPath, since), 6, () => false, default);
+            await WaitForAsync(() => SongLoadedForPlayerSince(emote, since), 6, () => false, default);
             ReportLoad(emote, since, priming: false, test: true);
             // Set to "the music mod's own song" between songs: take the test's silence off again.
             if (emote.Routes != null && !config.BetweenSongsSilence)
@@ -400,9 +408,9 @@ public sealed class SongSharer : IDisposable
 
     private void ReportLoad(ShareEmote emote, DateTime since, bool priming, bool test = false)
     {
-        var sound = LoadedForPlayerSince(emote.ScdPath, since);
+        var sound = SongLoadedForPlayerSince(emote, since);
         var anim = emote.SwapFromKey == null || LoadedForPlayerSince($"chara/action/{emote.SwapFromKey}.tmb", since);
-        var wrongObject = !sound && LoadedForOtherSince(emote.ScdPath, since);
+        var wrongObject = !sound && SongLoadedForOtherSince(emote, since);
         var soundyQ = !sound && SoundyQSeenOnSlotAt >= since;
 
         if (sound)
@@ -499,7 +507,15 @@ public sealed class SongSharer : IDisposable
 
         Status = "Converting song for sharing...";
         byte[] scd;
-        if (emote.Routes != null)
+        if (emote.Routes != null && !MusicModScanner.IsVorbis(template))
+        {
+            // A music mod whose song slot holds a short sound effect (MS-ADPCM), not streamed music: build the song
+            // the same way, or the game plays it silently.
+            Plugin.Log.Information($"{emote.ScdPath} holds a sound effect in this mod, so the song is built the same way (mono ADPCM)");
+            var audio = ScdBuilder.EncodeAdpcmMono(audioFile, config.ShareSmallerFiles ? 22050 : 44100, ct);
+            scd = ScdBuilder.Build(template, audio);
+        }
+        else if (emote.Routes != null)
         {
             // Music mod tracks are streamed music and only play Vorbis, like the mod's own songs.
             Status = ffmpegTool.CurrentPath == null ? "Downloading ffmpeg (once, about 120 MB)..." : Status;

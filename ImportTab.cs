@@ -18,6 +18,7 @@ public sealed class ImportTab
 
     private int sourceKind; // 0 = YouTube, 1 = file on your PC
     private string youtubeLink = string.Empty;
+    private string modSearch = string.Empty;
     private string localFile = string.Empty;
     private string songName = string.Empty;
     private List<(string Route, int Uses)>? routes;
@@ -78,27 +79,46 @@ public sealed class ImportTab
 
         // ---- Into a mod
         Ui.Section("Add it to a mod");
-        ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
-        if (ImGui.BeginCombo("Mod", cfg.ImportTargetMod))
+        var follow = cfg.ImportFollowsSharing;
+        if (ImGui.Checkbox("Same mod and song file as Sharing", ref follow)) { cfg.ImportFollowsSharing = follow; routes = null; imported = null; changed = true; }
+        Ui.Help("On: songs are added to the music mod picked in Sharing → Music mod, on the same song file its dance plays, so "
+                + "\"the song picked in the music mod\" is one you imported. Off: pick another mod and sound files here.");
+        if (cfg.ImportFollowsSharing)
         {
-            foreach (var (folder, name) in plugin.Music.ModList().OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase))
-                if (ImGui.Selectable(name == folder ? name : $"{name} ({folder})", folder == cfg.ImportTargetMod))
-                {
-                    cfg.ImportTargetMod = folder;
-                    routes = null;
-                    imported = null;
-                    changed = true;
-                }
-            ImGui.EndCombo();
+            // Keep the import target in step with Sharing's (it's the same mod Tundy's songs play through).
+            if (cfg.ImportTargetMod != cfg.QueueTargetMod) { cfg.ImportTargetMod = cfg.QueueTargetMod; routes = null; imported = null; changed = true; }
+            var sharingRoutes = plugin.Music.Routes.ToList();
+            if (!cfg.ImportRoutes.SequenceEqual(sharingRoutes, StringComparer.OrdinalIgnoreCase)) { cfg.ImportRoutes = sharingRoutes; changed = true; }
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(Theme.Muted, $"Mod: \"{cfg.ImportTargetMod}\" · song file {string.Join(", ", cfg.ImportRoutes)}");
+            ImGui.PopTextWrapPos();
+        }
+
+        if (!cfg.ImportFollowsSharing)
+        {
+        ImGui.SetNextItemWidth(320 * ImGuiHelpers.GlobalScale);
+        var modItems = plugin.Music.ModList().OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(m => (m.Key, m.Value == m.Key ? m.Value : $"{m.Value} ({m.Key})"));
+        if (Ui.SearchCombo("Mod", cfg.ImportTargetMod, cfg.ImportTargetMod, modItems, ref modSearch, out var pickedMod, "Search your mods")
+            && pickedMod != cfg.ImportTargetMod)
+        {
+            cfg.ImportTargetMod = pickedMod!;
+            routes = null;
+            imported = null;
+            changed = true;
         }
         Ui.Help("The mod the song is added to, as a new option in its \"Tundy imports\" group. For the Mega Music Mod "
                 + "it becomes a song for the DJ dance.");
+
+        }
 
         if (routes == null || routesFor != cfg.ImportTargetMod)
         {
             routesFor = cfg.ImportTargetMod;
             routes = importer.ModFolder(cfg.ImportTargetMod) is { } dir ? MegaMusicMod.ScanRoutes(dir) : new();
         }
+        if (!cfg.ImportFollowsSharing)
+        {
         ImGui.TextUnformatted("Sound file(s) it plays on:");
         Ui.Help("The game sound files this mod puts its sounds on, most used first. The top one is usually the main one "
                 + "(sound/lolo.scd for the Mega Music Mod's DJ dance). Animations in the mod play these files.");
@@ -119,7 +139,11 @@ public sealed class ImportTab
             }
             ImGui.EndChild();
         }
-        var chosen = cfg.ImportRoutes.Where(r => routes.Any(x => x.Route.Equals(r, StringComparison.OrdinalIgnoreCase))).ToList();
+        }
+        // Following Sharing, its song file counts even if this mod lists it under another option file.
+        var chosen = cfg.ImportFollowsSharing
+            ? cfg.ImportRoutes.ToList()
+            : cfg.ImportRoutes.Where(r => routes.Any(x => x.Route.Equals(r, StringComparison.OrdinalIgnoreCase))).ToList();
 
         var select = cfg.ImportSelectAfter;
         if (ImGui.Checkbox("Pick it in the mod right away", ref select)) { cfg.ImportSelectAfter = select; changed = true; }

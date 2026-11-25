@@ -97,6 +97,52 @@ public static class Ui
         return clicked;
     }
 
+    /// <summary>
+    /// A drop-down with a search box at the top: type to narrow the list, Enter picks the first match. The search
+    /// box gets the keyboard as soon as the list opens. Returns true when something was picked.
+    /// </summary>
+    /// <param name="items">(key, label) pairs; the key is what's returned in <paramref name="picked"/>.</param>
+    /// <param name="filter">The search text, kept by the caller between frames.</param>
+    public static bool SearchCombo(string label, string preview, string? selectedKey,
+                                   System.Collections.Generic.IEnumerable<(string Key, string Label)> items,
+                                   ref string filter, out string? picked, string hint = "Search")
+    {
+        picked = null;
+        if (!ImGui.BeginCombo(label, preview, ImGuiComboFlags.HeightLargest)) return false;
+
+        if (ImGui.IsWindowAppearing())
+        {
+            filter = string.Empty;
+            ImGui.SetKeyboardFocusHere();
+        }
+        ImGui.SetNextItemWidth(-1);
+        var enter = ImGui.InputTextWithHint("##search", hint, ref filter, 64, ImGuiInputTextFlags.EnterReturnsTrue);
+
+        var text = filter.Trim();
+        var matches = items.Where(i => text.Length == 0 || i.Label.Contains(text, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (enter && matches.Count > 0)
+        {
+            picked = matches[0].Key;
+            ImGui.CloseCurrentPopup();
+        }
+
+        var line = ImGui.GetTextLineHeightWithSpacing();
+        ImGui.BeginChild("##results", new Vector2(0, Math.Clamp(matches.Count, 1, 14) * line + 4), false);
+        foreach (var (key, itemLabel) in matches)
+        {
+            if (ImGui.Selectable($"{itemLabel}##{key}", key == selectedKey))
+            {
+                picked = key;
+                ImGui.CloseCurrentPopup();
+            }
+            if (key == selectedKey && ImGui.IsWindowAppearing()) ImGui.SetScrollHereY();
+        }
+        if (matches.Count == 0) ImGui.TextDisabled(text.Length > 0 ? "Nothing matches." : "Nothing to pick.");
+        ImGui.EndChild();
+        ImGui.EndCombo();
+        return picked != null;
+    }
+
     /// <summary>Puts the next item on this line if it fits, otherwise on the next line.</summary>
     public static void SameLineIfFits(float nextWidth)
     {

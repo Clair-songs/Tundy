@@ -60,7 +60,9 @@ Soundy's import tools: add a song to a mod for good, not just for one request.
 - **Song**: a YouTube link or a file on your PC (mp3, m4a, ogg, opus, wav, flac...), an optional name, **Loudness**
   (1.0 = as it is, up to 5.0, with a limiter so it doesn't distort) and **EQ** (Soundy's presets: Neutral, Club /
   Bass, EDM, Rock, Pop, Orchestral / Score, Vocal Boost, Chill / Lo-Fi). Yours were copied from Soundy.
-- **Add it to a mod**: pick the mod and the sound file(s) it should play on. Tundy lists the sound files the mod uses,
+- **Add it to a mod**: by default the same mod and song file as Sharing → Music mod ("Same mod and song file as
+  Sharing"), so a song you import is one the dance can play between requests. Untick it to pick another mod and the
+  sound file(s) it should play on. Tundy lists the sound files the mod uses,
   most used first (for the Mega Music Mod: `sound/lolo.scd`, the DJ dance's song). The song becomes a new option in
   the mod's **Tundy imports** group, converted like the mod's own sound there (stereo Vorbis music, or mono ADPCM
   for sound effects), and can be picked right away.
@@ -127,9 +129,17 @@ plays one sound file, `sound/lolo.scd`. For each song Tundy:
 
 Between songs, Tundy Song holds a short silent track on that file, so the dance (which keeps going after a song)
 doesn't play one of the music mod's own songs, and Lightless keeps knowing the file. One-time setup: in the Sharing tab click **Set up Mega Music Mod for me** (turns the mod on with
-its "Dj (Cheer Jump)" dance and the DJ deck for your race). You can pick another music mod, scan it for its sound
-files, and change the emote there. The problems banner warns when the mod's dance isn't set to "Dj (Cheer Jump)",
+its "Dj (Cheer Jump)" dance and the DJ deck for your race). The music mod, its song file and emote are all chosen in one
+place: Sharing → **Music mod** (for the Mega Music Mod there's also "Song file and emote by hand"). The problems banner warns when the mod's dance isn't set to "Dj (Cheer Jump)",
 since only that dance plays the song slot on `/cheerjumpred`.
+
+**Through other dance or music mods.** Sharing → **Music mod**: pick any Penumbra mod and Tundy reads which
+of its dances play a song, on which emote (from the game's own emote data) and from which sound file, and lists them
+(music first; long sound effects such as voices only when you tick "Show sound effects too"). Then either follow the
+dance that's turned on in Penumbra (Tundy switches with it), always use one you pick, or set the song file and emote by
+hand (then nothing changes them; mods where Tundy finds no dance always work this way). **Set up** turns the mod and that
+dance on in your collection. Songs are built in the same format as the mod's own file: streamed stereo music like the Mega
+Music Mod, or mono sound effects where the dance plays one, so they aren't silent. Big mods take a few seconds to scan.
 
 **On one emote's own sound.** Works without a music mod: the song replaces an emote's normal sound while it plays
 (default `/fume`). `/cheerjumpred` is in that list too, set up to swap its start animation for Linkpearl's, whose

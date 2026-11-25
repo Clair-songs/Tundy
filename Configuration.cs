@@ -235,6 +235,26 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public bool BetweenSongsSilence { get; set; } = true;
 
+    // ---- Other music mods (Sharing → Music mod) ----
+
+    /// <summary>Use the dance that's turned on in Penumbra (true), or always the one picked in <see cref="OtherModDance"/>.</summary>
+    public bool OtherModFollow { get; set; } = true;
+
+    /// <summary>The picked dance: "group\u0001option" (see DanceSong.Key).</summary>
+    public string OtherModDance { get; set; } = "";
+
+    /// <summary>Also list dances whose sound is a long sound effect, not music.</summary>
+    public bool OtherModShowEffects { get; set; }
+
+    /// <summary>
+    /// Song file(s) and emote set by hand (Sharing → Music mod → By hand) instead of from a scanned dance, so
+    /// nothing changes them. Mods without a dance Tundy can find always work this way.
+    /// </summary>
+    public bool OtherModByHand { get; set; }
+
+    /// <summary>The Import tab adds songs to the same mod and song file(s) as Sharing (instead of its own choice).</summary>
+    public bool ImportFollowsSharing { get; set; } = true;
+
     // ---- Importer ----
 
     /// <summary>Penumbra mod (folder name) songs are imported into.</summary>

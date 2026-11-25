@@ -74,6 +74,10 @@ public sealed class MegaMusicMod
                 try { dance = WrongDance(collection.Id); }
                 catch (Exception ex) { Plugin.Log.Debug(ex, "Couldn't read the music mod's dance"); }
             }
+            // Another music mod: scan it once (also after a restart), then keep its dance's song slot and emote in use.
+            if (!IsRecommended && config.ShareTarget == 0 && Scan == null && !Scanning) StartScan();
+            try { ApplyDance(collection.Id); }
+            catch (Exception ex) { Plugin.Log.Debug(ex, "Couldn't apply the other music mod's dance"); }
             return state;
         }
         catch
@@ -115,6 +119,177 @@ public sealed class MegaMusicMod
 
     /// <summary>The Mega Music Mod the "Use Mega Music Mod" button switches to: the installed version.</summary>
     public string PreferredMega => InstalledMega() ?? RecommendedMod;
+
+    // ------------------------------------------------------------------ other music mods
+
+    private Dictionary<string, EmoteInfo>? emoteKeys;
+    private MusicModScan? scan;
+    private System.Threading.Tasks.Task? scanning;
+
+    /// <summary>The last scan of the selected mod (null until it's scanned, or after picking another mod).</summary>
+    public MusicModScan? Scan => scan is { } s && s.ModFolder == TargetFolder() ? s : null;
+
+    public bool Scanning => scanning is { IsCompleted: false };
+
+    public string ScanStatus { get; private set; } = "";
+
+    /// <summary>The dance whose song slot and emote are in use now (for the settings), if it's from a scan.</summary>
+    public DanceSong? CurrentDance { get; private set; }
+
+    /// <summary>Reads the selected mod's dances in the background (big mods take a while).</summary>
+    public void StartScan()
+    {
+        if (Scanning || TargetFolder() is not { } dir) return;
+        ScanStatus = "Scanning the mod's dances...";
+        scanning = System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var keys = EmoteKeys();
+                var result = MusicModScanner.Scan(dir, k => keys.GetValueOrDefault(k));
+                scan = result;
+                ScanStatus = $"Found {result.Songs.Count} dance(s) with a song in {result.AnimatedOptions} animated option(s).";
+                Plugin.Log.Information($"Scanned \"{config.QueueTargetMod}\": {ScanStatus}");
+                stateAt = DateTime.MinValue; // apply the dance on the next check
+            }
+            catch (Exception ex)
+            {
+                ScanStatus = $"Couldn't scan the mod: {ex.Message}";
+                Plugin.Log.Warning(ex, "Music mod scan failed");
+            }
+        });
+    }
+
+    /// <summary>Animation key ("emote/dance03_loop") -> the emote that plays it, from the game's data.</summary>
+    private Dictionary<string, EmoteInfo> EmoteKeys()
+    {
+        if (emoteKeys != null) return emoteKeys;
+        var map = new Dictionary<string, EmoteInfo>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var row in Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Emote>())
+            {
+                if (row.TextCommand.ValueNullable is not { } tc) continue;
+                var cmd = tc.ShortCommand.ExtractText();
+                if (string.IsNullOrEmpty(cmd)) cmd = tc.Command.ExtractText();
+                if (string.IsNullOrEmpty(cmd)) continue;
+                foreach (var t in row.ActionTimeline)
+                    if (t.ValueNullable is { } a && a.Key.ExtractText() is { Length: > 0 } key)
+                        map.TryAdd(key.ToLowerInvariant(), new EmoteInfo(row.RowId, cmd.ToLowerInvariant(), row.Name.ExtractText()));
+            }
+        }
+        catch (Exception ex) { Plugin.Log.Warning(ex, "Couldn't read the game's emotes"); }
+        return emoteKeys = map;
+    }
+
+    /// <summary>
+    /// Switches to another mod: for the Mega Music Mod back to its song slot and DJ emote; for other mods the slot
+    /// and emote come from a scan (started here).
+    /// </summary>
+    public void UseMod(string folder)
+    {
+        config.QueueTargetMod = folder;
+        config.ShareTarget = 0;
+        config.OtherModByHand = false; // a new mod starts from its scanned dances
+        CurrentDance = null;
+        if (IsRecommended)
+        {
+            config.QueueScdRoutes = new List<string> { RecommendedRoute };
+            config.QueueEmoteCommand = RecommendedEmote;
+        }
+        else
+        {
+            // Another mod: forget the old mod's slot; the scan picks this mod's (until then nothing extra is added).
+            config.QueueScdRoutes = config.QueueScdRoutes
+                .Where(r => !r.Equals(RecommendedRoute, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        Recheck();
+        if (!IsRecommended) StartScan();
+    }
+
+    /// <summary>
+    /// For a scanned (non-Mega) mod: puts the song slot and emote of the dance to use into the settings, either the
+    /// one turned on in Penumbra (following) or the one picked. Called with every state check.
+    /// </summary>
+    private void ApplyDance(Guid collection)
+    {
+        // The Mega Music Mod keeps its own slot and emote; "by hand" means nothing here changes them.
+        if (IsRecommended || config.OtherModByHand || Scan is not { } s || s.Songs.Count == 0) return;
+        DanceSong? dance = null;
+        if (config.OtherModFollow)
+        {
+            var (ec, settings) = new GetCurrentModSettings(pi).Invoke(collection, config.QueueTargetMod);
+            if (ec == PenumbraApiEc.Success && settings is { } st)
+            {
+                // A dance built into the mod (not an option you can turn on or off) is on whenever the mod is.
+                bool On(DanceSong d) => d.Group == "(always on)"
+                    || (st.Item3.TryGetValue(d.Group, out var picked) && picked.Contains(d.Option));
+                var enabled = s.Songs.Where(On).ToList();
+                dance = enabled.FirstOrDefault(d => d.Key == config.OtherModDance)
+                        ?? enabled.FirstOrDefault(d => d.IsMusic) ?? enabled.FirstOrDefault();
+            }
+        }
+        else
+        {
+            dance = s.Songs.FirstOrDefault(d => d.Key == config.OtherModDance);
+        }
+
+        // Nothing picked or on, but all of the mod's dances play the same song file (like most single-dance mods):
+        // that's the slot, whichever dance it is.
+        if (dance == null && s.Songs.Select(d => d.Route).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+            dance = s.Songs.FirstOrDefault(d => d.Emote != null) ?? s.Songs[0];
+
+        CurrentDance = dance;
+        if (dance == null)
+        {
+            // Still drop a leftover Mega Music Mod slot this mod doesn't use, so songs and checks go where the mod plays.
+            var supplied = s.Songs.Select(d => d.Route).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (config.QueueScdRoutes.Any(r => r.Equals(RecommendedRoute, StringComparison.OrdinalIgnoreCase) && !supplied.Contains(r))
+                && config.QueueScdRoutes.Any(r => !r.Equals(RecommendedRoute, StringComparison.OrdinalIgnoreCase)))
+            {
+                config.QueueScdRoutes = config.QueueScdRoutes.Where(r => !r.Equals(RecommendedRoute, StringComparison.OrdinalIgnoreCase)).ToList();
+                lock (templates) templates.Clear();
+            }
+            return;
+        }
+        if (!(config.QueueScdRoutes.Count == 1 && config.QueueScdRoutes[0].Equals(dance.Route, StringComparison.OrdinalIgnoreCase)))
+        {
+            config.QueueScdRoutes = new List<string> { dance.Route };
+            lock (templates) templates.Clear();
+        }
+        if (dance.Emote is { } e) config.QueueEmoteCommand = e.Command;
+    }
+
+    /// <summary>Turns the mod and this dance's option on in your Penumbra collection, and picks the dance.</summary>
+    public string SetUpDance(DanceSong dance)
+    {
+        if (objects.LocalPlayer == null) return "Log in to a character first.";
+        var (_, _, collection) = new GetCollectionForObject(pi).Invoke(0);
+        var ec = new TrySetMod(pi).Invoke(collection.Id, config.QueueTargetMod, true);
+        if (ec is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged))
+            return $"Penumbra couldn't turn the mod on ({ec}).";
+
+        if (dance.Group != "(always on)")
+        {
+            var wanted = new List<string> { dance.Option };
+            if (dance.MultiGroup)
+            {
+                // Several can be on at once: keep the others.
+                var (sec, settings) = new GetCurrentModSettings(pi).Invoke(collection.Id, config.QueueTargetMod);
+                if (sec == PenumbraApiEc.Success && settings is { } s && s.Item3.TryGetValue(dance.Group, out var on))
+                    wanted = on.Append(dance.Option).Distinct().ToList();
+            }
+            var oc = new TrySetModSettings(pi).Invoke(collection.Id, config.QueueTargetMod, dance.Group, wanted.ToArray());
+            if (oc is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged))
+                return $"Turned the mod on, but Penumbra couldn't pick \"{dance.Option}\" ({oc}). Pick it in Penumbra.";
+        }
+
+        config.OtherModDance = dance.Key;
+        new RedrawObject(pi).Invoke(0);
+        Recheck();
+        return $"\"{dance.Option}\" is on in \"{collection.Name}\". Songs go on {dance.Route}"
+               + (dance.Emote is { } e ? $", played by {e.Command}." : ". Set the emote that plays it below.");
+    }
 
     /// <summary>The Mega Music Mod, or another version of it (for example the "No songs Ver.").</summary>
     public bool IsRecommended => config.QueueTargetMod.StartsWith(RecommendedMod, StringComparison.OrdinalIgnoreCase);

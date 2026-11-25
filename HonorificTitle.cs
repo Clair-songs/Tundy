@@ -27,10 +27,12 @@ public sealed class HonorificTitle : IDisposable
     private readonly ICallGateSubscriber<(uint, uint)> apiVersion;
     private readonly ICallGateSubscriber<int, string, object> setTitle;
     private readonly ICallGateSubscriber<int, object> clearTitle;
+    private readonly ICallGateSubscriber<string> getLocalTitle;
     private readonly ICallGateSubscriber<object> ready;
     private readonly ICallGateSubscriber<object> disposing;
 
     private string? applied;       // the JSON Tundy put on, or null
+    private string? appliedText;   // its title text ("♪ Song"), to check it's really gone after clearing
     private DateTime idleSince = DateTime.MaxValue;
     private DateTime lastTick = DateTime.MinValue;
 
@@ -49,6 +51,7 @@ public sealed class HonorificTitle : IDisposable
         apiVersion = pi.GetIpcSubscriber<(uint, uint)>("Honorific.ApiVersion");
         setTitle = pi.GetIpcSubscriber<int, string, object>("Honorific.SetCharacterTitle");
         clearTitle = pi.GetIpcSubscriber<int, object>("Honorific.ClearCharacterTitle");
+        getLocalTitle = pi.GetIpcSubscriber<string>("Honorific.GetLocalCharacterTitle");
         ready = pi.GetIpcSubscriber<object>("Honorific.Ready");
         disposing = pi.GetIpcSubscriber<object>("Honorific.Disposing");
 
@@ -58,7 +61,13 @@ public sealed class HonorificTitle : IDisposable
         framework.Update += OnUpdate;
     }
 
-    private void OnHonorificChanged() => applied = null;
+    private void OnHonorificChanged()
+    {
+        // Honorific (re)loaded: it forgot Tundy's title. Start over on the next tick.
+        applied = null;
+        appliedText = null;
+        phase = Phase.Idle;
+    }
 
     /// <summary>True when Honorific is installed and answers (API 3 or newer).</summary>
     public bool Available
@@ -70,6 +79,18 @@ public sealed class HonorificTitle : IDisposable
         }
     }
 
+    // Taking the song title off happens in steps, one per check (every second):
+    //  Restoring: your own title (remembered before the first song) is put on for a moment, so Honorific writes it
+    //             onto your nameplate and has the game redraw it,
+    //  Verifying: then Tundy's entry is removed, and for 10 seconds Tundy checks that Honorific shows your title
+    //             again, removing the song title again if it ever comes back.
+    private enum Phase { Idle, Showing, Restoring, Verifying }
+
+    private Phase phase = Phase.Idle;
+    private DateTime phaseUntil;
+    private string? remembered;      // your title as Honorific reported it before the first song ("" = none)
+    private string? lastSongText;    // the song title last shown, to spot it coming back
+
     private void OnUpdate(IFramework _)
     {
         if ((DateTime.Now - lastTick).TotalSeconds < 1) return;
@@ -77,15 +98,30 @@ public sealed class HonorificTitle : IDisposable
         if (objects.LocalPlayer == null) return;
 
         var (title, shared, busy) = nowPlaying();
-        var wanted = config.HonorificTitle && title != null && (shared || !config.HonorificOnlyWhenSharing)
-            ? Json(Format(title, ArtistTurn(title)))
+        var text = config.HonorificTitle && title != null && (shared || !config.HonorificOnlyWhenSharing)
+            ? Format(title, ArtistTurn(title))
             : null;
+        var wanted = text != null ? Json(text) : null;
 
         if (wanted != null)
         {
             idleSince = DateTime.MaxValue;
-            if (wanted != applied) Apply(wanted);
+            if (wanted != applied) Apply(wanted, text!);
             return;
+        }
+
+        switch (phase)
+        {
+            case Phase.Restoring when DateTime.Now >= phaseUntil:
+                Remove("removed the song title");
+                phase = Phase.Verifying;
+                phaseUntil = DateTime.Now.AddSeconds(10);
+                return;
+            case Phase.Restoring:
+                return;
+            case Phase.Verifying:
+                Verify();
+                return;
         }
 
         // Between two songs (the next one is getting ready) keep the old title for a moment, so it doesn't flicker
@@ -93,31 +129,121 @@ public sealed class HonorificTitle : IDisposable
         if (applied == null) { Status = Available ? "Honorific found. Nothing shown right now." : "Honorific isn't installed."; return; }
         if (config.HonorificTitle && busy) return;
         if (idleSince == DateTime.MaxValue) idleSince = DateTime.Now;
-        if (!config.HonorificTitle || (DateTime.Now - idleSince).TotalSeconds >= 3) Clear();
+        if (!config.HonorificTitle || (DateTime.Now - idleSince).TotalSeconds >= 3) StartRestore();
     }
 
-    private void Apply(string json)
+    private void Apply(string json, string text)
     {
         try
         {
+            if (applied == null && phase is Phase.Idle)
+            {
+                // Before the first song: remember what Honorific shows as your title, to put it back afterwards.
+                remembered = ReportedTitleJson() ?? "";
+                Plugin.Log.Information($"Honorific: your title before the songs is {Describe(remembered)}.");
+            }
+            var newSong = text != lastSongText && !IsSwapOf(text);
             setTitle.InvokeAction(0, json); // object 0 = your character
             applied = json;
+            appliedText = text;
+            lastSongText = text;
+            phase = Phase.Showing;
+            if (newSong) Plugin.Log.Information($"Honorific: showing the song as your title: \"{text}\".");
             Status = "Showing the song as your title.";
         }
         catch (Exception ex)
         {
             Status = "Honorific isn't installed.";
-            Plugin.Log.Debug(ex, "Couldn't set the Honorific title");
+            Plugin.Log.Warning(ex, "Honorific: couldn't set the song title");
         }
     }
 
+    // Swapping between "♪ Song" and "by Artist" isn't a new song (not logged each time).
+    private bool IsSwapOf(string text) =>
+        config.HonorificShow == ShowSwap && lastSongText != null && (text.StartsWith("by ", StringComparison.Ordinal) || lastSongText.StartsWith("by ", StringComparison.Ordinal));
+
+    /// <summary>Step 1 of taking the song title off: put your own title (or the game's) on, so the nameplate is redrawn.</summary>
+    private void StartRestore()
+    {
+        try
+        {
+            var restore = string.IsNullOrEmpty(remembered)
+                ? JsonSerializer.Serialize(new { Title = "", IsPrefix = false, IsOriginal = true }) // the game's own title
+                : remembered;
+            setTitle.InvokeAction(0, restore);
+            Plugin.Log.Information($"Honorific: the music stopped; putting back {Describe(remembered)} before removing Tundy's title.");
+        }
+        catch (Exception ex) { Plugin.Log.Warning(ex, "Honorific: couldn't put your title back"); }
+        applied = null;
+        appliedText = null;
+        idleSince = DateTime.MaxValue;
+        phase = Phase.Restoring;
+        phaseUntil = DateTime.Now.AddSeconds(1.5);
+        Status = "Putting your own title back...";
+    }
+
+    /// <summary>Removes Tundy's title from Honorific (an empty title, and the clear command as a backup).</summary>
+    private void Remove(string what)
+    {
+        try { setTitle.InvokeAction(0, string.Empty); }
+        catch (Exception ex) { Plugin.Log.Warning(ex, "Honorific: the empty title failed"); }
+        try { clearTitle.InvokeAction(0); }
+        catch { /* the empty title above is what counts */ }
+        Plugin.Log.Information($"Honorific: {what}; it now shows {Describe(ReportedTitleJson())}.");
+    }
+
+    /// <summary>Step 3: for 10 seconds, check the song title doesn't come back; remove it again if it does.</summary>
+    private void Verify()
+    {
+        var now = ReportedTitleJson();
+        if (TitleText(now) is { } t && t == lastSongText)
+        {
+            Remove("the song title came back, removed it again");
+            Status = "Taking the song title off again...";
+            return;
+        }
+        if (DateTime.Now < phaseUntil) return;
+        phase = Phase.Idle;
+        lastSongText = null;
+        Status = "Your own title is back.";
+        Plugin.Log.Information($"Honorific: done; your title is {Describe(now)}.");
+    }
+
+    /// <summary>Takes the song title off right away (unloading Tundy).</summary>
     private void Clear()
     {
-        try { clearTitle.InvokeAction(0); }
-        catch (Exception ex) { Plugin.Log.Debug(ex, "Couldn't clear the Honorific title"); }
+        if (!string.IsNullOrEmpty(remembered))
+        {
+            try { setTitle.InvokeAction(0, remembered); } catch { /* best effort */ }
+        }
+        Remove("Tundy is closing, removed the song title");
         applied = null;
-        idleSince = DateTime.MaxValue;
+        appliedText = null;
+        phase = Phase.Idle;
     }
+
+    /// <summary>The title Honorific reports for your character right now, as its JSON ("" for none); null if it can't tell.</summary>
+    private string? ReportedTitleJson()
+    {
+        try { return getLocalTitle.InvokeFunc() ?? ""; }
+        catch { return null; }
+    }
+
+    private static string? TitleText(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("Title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+        }
+        catch { return null; }
+    }
+
+    private static string Describe(string? json) =>
+        json == null ? "(Honorific didn't say)"
+        : TitleText(json) is { Length: > 0 } t ? $"\"{t}\""
+        : "no Honorific title (the game's own)";
 
     /// <summary>What the title shows: 0 the song's name, 1 the song's name then the artist, 2 swap between the two.</summary>
     public const int ShowSong = 0, ShowSongThenArtist = 1, ShowSwap = 2;
@@ -187,7 +313,8 @@ public sealed class HonorificTitle : IDisposable
         framework.Update -= OnUpdate;
         ready.Unsubscribe(OnHonorificChanged);
         disposing.Unsubscribe(OnHonorificChanged);
-        if (applied != null)
+        // Also mid-way through putting your title back (Tundy's entry is still set then).
+        if (applied != null || phase is Phase.Restoring or Phase.Verifying)
         {
             try { framework.RunOnFrameworkThread(Clear).Wait(TimeSpan.FromSeconds(2)); }
             catch { /* ignored */ }
