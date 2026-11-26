@@ -150,9 +150,9 @@ public sealed partial class MainWindow
         if (guideStep == 0)
         {
             var command = guideCommand.Trim();
-            if (command.Length == 0 || command.Contains(' ') || command.Equals("!skip", StringComparison.OrdinalIgnoreCase))
+            if (command.Length == 0 || command.Contains(' ') || Plugin.IsReservedCommand(command))
             {
-                guideCommandError = "The command has to be one word without spaces, and not !skip.";
+                guideCommandError = "The command has to be one word without spaces, and not !skip or !skipall.";
                 return false;
             }
             guideCommandError = string.Empty;

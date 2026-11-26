@@ -89,6 +89,14 @@ public sealed partial class Plugin : IDalamudPlugin
     [GeneratedRegex(@"^\s*!skip\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex SkipRegex();
 
+    // "!skipall": remove all of your own songs
+    [GeneratedRegex(@"^\s*!skipall\s*$", RegexOptions.IgnoreCase)]
+    private static partial Regex SkipAllRegex();
+
+    /// <summary>The fixed commands, which can't be used as request or shuffle commands.</summary>
+    public static bool IsReservedCommand(string command) =>
+        command.Equals("!skip", StringComparison.OrdinalIgnoreCase) || command.Equals("!skipall", StringComparison.OrdinalIgnoreCase);
+
     // "<command> <link>", e.g. "!q <link>"; which commands count is decided by RequestCommands.
     [GeneratedRegex(@"^\s*(?<cmd>\S+)\s+(?<url>\S+)\s*$")]
     private static partial Regex RequestRegex();
@@ -541,7 +549,7 @@ public sealed partial class Plugin : IDalamudPlugin
         !Config.AllowShuffleCommand
             ? Array.Empty<string>()
             : Config.ShuffleCommands.Select(a => a.Trim())
-                .Where(a => a.Length > 0 && !a.Contains(' ') && !a.Equals("!skip", StringComparison.OrdinalIgnoreCase)
+                .Where(a => a.Length > 0 && !a.Contains(' ') && !IsReservedCommand(a)
                             && !RequestCommands.Contains(a, StringComparer.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -635,6 +643,59 @@ public sealed partial class Plugin : IDalamudPlugin
         Skip();
         Done($"Skipped \"{title}\"", true, $"Skipped \"{title}\".");
         Notify($"{sender} skipped \"{title}\".");
+    }
+
+    /// <summary>
+    /// "!skipall": removes all of the sender's own songs: the one playing (or about to start), the ones waiting in
+    /// the queue (also the one prepared to play next, and their playlist songs) and their requests waiting for
+    /// approval. Nobody else's songs are touched. Songs you added yourself never count as theirs.
+    /// </summary>
+    private void HandleSkipAll(IHandleableChatMessage message)
+    {
+        var sender = SenderName(message);
+        var encoded = message.Sender.Encode();
+        var world = QueueReplier.Target(encoded)?.World;
+
+        void Done(string outcome, bool ok, string? reply)
+        {
+            AddLog(sender, "!skipall", outcome, ok);
+            if (reply != null) Replier.Send(encoded, sender, reply);
+        }
+
+        if (!Config.AllowSkipAll) { Done("Ignored: !skipall is turned off", false, null); return; }
+        if (!Config.Enabled) { Done("Ignored: requests are paused", false, null); return; }
+        if (PermissionFor(sender, world) == RequestPermission.Blocked) { Done("Ignored: sender can't request songs", false, null); return; }
+
+        // The same short wait as !skip, shared with it.
+        var now = DateTime.UtcNow;
+        if (lastSkip.TryGetValue(sender, out var last) && (now - last).TotalSeconds < 10)
+        {
+            Done("Ignored: skipped less than 10 seconds ago", false, null);
+            return;
+        }
+        lastSkip[sender] = now;
+
+        bool Theirs(string requester) => requester != "You" && Names.Same(requester, sender);
+
+        var queued = Player.RemoveWhere(r => Theirs(r.Sender));
+        var waiting = Pending.TakeWhere(p => Theirs(p.Sender)).Length;
+        var playing = Player.Current?.Request ?? Player.Syncing?.Request;
+        var skipPlaying = playing != null && Theirs(playing.Sender);
+        if (skipPlaying) Skip();
+
+        var removed = queued + waiting;
+        var total = removed + (skipPlaying ? 1 : 0);
+        if (total == 0)
+        {
+            Done("Nothing of theirs to skip", false, "You don't have any songs in the queue.");
+            return;
+        }
+
+        var reply = removed > 0
+            ? $"Removed your {removed} song{(removed == 1 ? "" : "s")} from the queue{(skipPlaying ? " and skipped the one playing" : "")}."
+            : "Skipped your song that was playing.";
+        Done($"Skipped all their songs ({total})", true, reply);
+        Notify($"{sender} removed all {total} of their song{(total == 1 ? "" : "s")}.");
     }
 
     // ------------------------------------------------------------------ links
@@ -920,6 +981,11 @@ public sealed partial class Plugin : IDalamudPlugin
             return; // TellTunes answers these; see TellTunesLoaded
 
         var text = message.Message.TextValue;
+        if (SkipAllRegex().IsMatch(text))
+        {
+            if (!SoundyQListening) HandleSkipAll(message);
+            return;
+        }
         if (SkipRegex().IsMatch(text))
         {
             if (!SoundyQListening) HandleSkipRequest(message);

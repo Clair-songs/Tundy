@@ -1473,7 +1473,7 @@ public sealed partial class MainWindow : Window
         if ((ImGui.Button("Add command") || addAlias) && !string.IsNullOrWhiteSpace(aliasInput))
         {
             var a = aliasInput.Trim();
-            if (!a.Contains(' ') && !a.Equals("!skip", StringComparison.OrdinalIgnoreCase)
+            if (!a.Contains(' ') && !Plugin.IsReservedCommand(a)
                 && !cfg.QueueAliases.Contains(a, StringComparer.OrdinalIgnoreCase))
             {
                 cfg.QueueAliases.Add(a);
@@ -1481,7 +1481,7 @@ public sealed partial class MainWindow : Window
             }
             aliasInput = string.Empty;
         }
-        Ui.Help("One word, no spaces, e.g. !play. !skip is always the skip command.");
+        Ui.Help("One word, no spaces, e.g. !play. !skip and !skipall are always the skip commands.");
 
         // Shuffle commands
         Ui.Section("Shuffle commands");
@@ -1518,7 +1518,7 @@ public sealed partial class MainWindow : Window
         if ((ImGui.Button("Add shuffle command") || addShuffle) && !string.IsNullOrWhiteSpace(shuffleInput))
         {
             var s = shuffleInput.Trim();
-            if (!s.Contains(' ') && !s.Equals("!skip", StringComparison.OrdinalIgnoreCase)
+            if (!s.Contains(' ') && !Plugin.IsReservedCommand(s)
                 && !cfg.ShuffleCommands.Contains(s, StringComparer.OrdinalIgnoreCase))
             {
                 cfg.ShuffleCommands.Add(s);
@@ -1770,7 +1770,7 @@ public sealed partial class MainWindow : Window
 
         }
 
-        if (Ui.Group("Skipping with !skip"))
+        if (Ui.Group("Skipping with !skip and !skipall"))
         {
         string[] skipModes = { "Nobody (!skip is off)", "Only the person who requested the song", "Anyone who's allowed to request songs" };
         var skipMode = Math.Clamp(cfg.SkipPermission, 0, 2);
@@ -1779,6 +1779,13 @@ public sealed partial class MainWindow : Window
         Ui.Help("People send you \"/tell <you> !skip\" to skip the song that's playing. "
                 + "Blocked people can never skip, and one person can skip at most once every 10 seconds. "
                 + "With \"Tell people where their song is in the queue\" on, they also get a short reply.");
+
+        var skipAll = cfg.AllowSkipAll;
+        if (ImGui.Checkbox("Let people remove all their own songs with !skipall", ref skipAll)) { cfg.AllowSkipAll = skipAll; changed = true; }
+        Ui.Help("\"/tell <you> !skipall\" removes only that person's songs: the one playing (if it's theirs), their songs "
+                + "waiting in the queue (playlist songs too) and their requests waiting for your approval. Everyone else's "
+                + "songs stay as they are, and songs you added yourself never count. Works even when !skip is set to Nobody. "
+                + "Same 10-second wait as !skip; blocked people can't use it.");
 
         }
 

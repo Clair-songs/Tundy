@@ -58,6 +58,17 @@ public sealed class PreQueue
         }
     }
 
+    /// <summary>Takes out every waiting request that matches; returns them.</summary>
+    public PendingRequest[] TakeWhere(Func<PendingRequest, bool> match)
+    {
+        lock (items)
+        {
+            var taken = items.Where(match).ToArray();
+            items.RemoveAll(r => match(r));
+            return taken;
+        }
+    }
+
     public PendingRequest[] TakeAll()
     {
         lock (items)

@@ -280,6 +280,32 @@ public sealed class MusicPlayer : IDisposable
         Skip();
     }
 
+    // Requests removed while they were downloading (with nothing playing): dropped when the download finishes.
+    private readonly HashSet<Guid> dropped = new();
+
+    /// <summary>
+    /// Removes every waiting song that matches (the queue, the one prepared to play next, and the one downloading
+    /// when nothing plays). Doesn't touch the song playing now. Returns how many were removed. Used by !skipall.
+    /// </summary>
+    public int RemoveWhere(Func<SongRequest, bool> match)
+    {
+        lock (queueLock)
+        {
+            var n = queue.RemoveAll(r => match(r));
+            if (prefetchReq != null && match(prefetchReq))
+            {
+                CancelPrefetchLocked(requeue: false);
+                n++;
+                if (Current != null) StartPrefetchLocked();
+            }
+            if (Downloading != null && match(Downloading) && dropped.Add(Downloading.Id)) n++;
+            return n;
+        }
+    }
+
+    /// <summary>The song being shared that's still waiting for Lightless to sync (it isn't Current yet).</summary>
+    public Track? Syncing { get; private set; }
+
     /// <summary>Puts a song first in the queue (after the current one), ignoring the queue limit. Used by Retry.</summary>
     public void EnqueueNext(SongRequest req)
     {
@@ -465,6 +491,16 @@ public sealed class MusicPlayer : IDisposable
 
                     try { track = await DownloadAsync(req, ct); }
                     finally { lock (queueLock) Downloading = null; }
+
+                    // Removed while downloading (!skipall): don't play it.
+                    bool drop;
+                    lock (queueLock) drop = dropped.Remove(req.Id);
+                    if (drop && track != null)
+                    {
+                        if (!library.Contains(track.File)) DeleteFile(track.File);
+                        if (track.ScdPath != null) DeleteFile(track.ScdPath);
+                        track = null;
+                    }
                 }
 
                 if (track == null) continue;
@@ -607,6 +643,7 @@ public sealed class MusicPlayer : IDisposable
             try
             {
                 WaitingForSync = true;
+                Syncing = track;
                 notify($"Sharing \"{track.Title}\" through Lightless, starting in a few seconds...");
                 await sharer.PrepareAsync(track.ScdPath, () => skipRequested, ct);
             }
@@ -619,6 +656,7 @@ public sealed class MusicPlayer : IDisposable
             finally
             {
                 WaitingForSync = false;
+                Syncing = null;
             }
 
             if (skipRequested)

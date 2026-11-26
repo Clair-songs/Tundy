@@ -129,6 +129,9 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public bool ReplyWhyRejected { get; set; } = true;
 
+    /// <summary>"!skipall": people can remove all of their own songs (playing, queued, waiting for approval).</summary>
+    public bool AllowSkipAll { get; set; } = true;
+
     // ---- Downloads ----
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>

@@ -158,11 +158,17 @@ Limits:
   emote). If you stopped dancing, the song starts with the emote as usual. Skipping a song puts silence on the song
   slot and redraws you, which cuts the song off; if you're dancing, you keep dancing.
 
-## Skipping with `!skip`
-People can send `/tell <you> !skip` to skip the song that's playing. Settings → **Skipping with !skip** →
+## Skipping with `!skip` and `!skipall`
+People can send `/tell <you> !skip` to skip the song that's playing. Settings → **Skipping with !skip and !skipall** →
 **Who can skip**: only the person who requested the song (default), anyone who's allowed to request songs, or
 nobody. Blocked people can't skip, one person can skip at most once every 10 seconds, and every `!skip` shows in
 the Requests log (Queue tab).
+
+`/tell <you> !skipall` removes all of that person's own songs, and nobody else's: the one playing (if it's
+theirs), their songs waiting in the queue (playlist songs too) and their requests waiting for your approval. Songs you
+added yourself never count as theirs. It's on by default ("Let people remove all their own songs with !skipall") and
+works even when `!skip` is set to nobody; the same 10-second wait applies, and blocked people can't use it. With replies
+on they're told how many were removed.
 
 ## Replying to requesters (optional, off by default)
 Settings → **Reply to requesters**: after a request is accepted, the requester gets a tell such as "Your song is up
