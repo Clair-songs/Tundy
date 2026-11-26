@@ -170,6 +170,25 @@ added yourself never count as theirs. It's on by default ("Let people remove all
 works even when `!skip` is set to nobody; the same 10-second wait applies, and blocked people can't use it. With replies
 on they're told how many were removed.
 
+## Jukebox terminal (Tundy to Tundy)
+Right-click another player and pick **Tundy: open jukebox terminal** (or target them and type `/tundy jukebox`). If they run
+Tundy too, the terminal links to theirs and shows what's playing, how long their queue is, and their rules (approval,
+cooldown, max songs per send). If they don't, it says LINK FAILED: it only works between two Tundys.
+
+- **Your playlists**, saved on your PC: make, rename (double-click), duplicate and delete them; add songs by pasting a
+  YouTube or Spotify link or by searching YouTube; reorder or remove songs. Names and lengths are filled in for you.
+- **Send to their queue** or **Shuffle & send**: their Tundy treats it like a playlist request from you, so their rules
+  apply (who can request, approval, max songs per playlist, playlist cooldown). With approval, it waits on their Now
+  playing tab as one "Jukebox: N songs" request.
+- **Save their queue** copies the songs in their queue into a new playlist of yours.
+- The terminal uses your Tundy theme (pastel, minimal or Dalamud's own look).
+
+How it talks: there's no other channel between two players' plugins, so the two Tundys use tells. Each tell starts with
+`~tdy1` and both Tundys hide those tells from chat. Songs travel as short YouTube/Spotify ids, about 35 per tell, so a
+playlist is one tell (or a few for big ones), spaced out like Tundy's other replies. It works wherever you could send
+them a tell. To stop other players' terminals from sending you songs, untick Settings → Jukebox terminal → "Let other
+Tundy players send me songs".
+
 ## Replying to requesters (optional, off by default)
 Settings → **Reply to requesters**: after a request is accepted, the requester gets a tell such as "Your song is up
 next!" or "Your song is in the queue. 3 songs play before it." It's sent with `/tell Name@World` to that exact
@@ -257,7 +276,7 @@ on small status dots), or **Dalamud's own look**. The mini player and the welcom
 progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing
 window, or right-click the window): cover, name, a thin time bar, skip and the next song, without a title bar.
 
-Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
+Chat commands: `/tundy mini | jukebox | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
 
 ## Sharing Tundy with other people
 `dotnet build -c Release` makes `bin\Release\Tundy\latest.zip` (the plugin and everything it needs) and

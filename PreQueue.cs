@@ -24,6 +24,9 @@ public sealed class PendingRequest
     /// <summary>The song's length in seconds, once it's looked up.</summary>
     public int? Seconds { get; set; }
 
+    /// <summary>Songs sent from someone's jukebox terminal (compact ids, see JukeboxProtocol), or null.</summary>
+    public IReadOnlyList<string>? JukeboxIds { get; init; }
+
     public string Display => Title ?? (Playlist != null ? $"Playlist: {Url}" : Url);
 }
 

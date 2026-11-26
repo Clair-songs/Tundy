@@ -71,7 +71,8 @@ $pluginmaster = Join-Path $tmp "pluginmaster.json"
 
 # 3. Files: the source (not build output), plus the plugin repository files
 $files = [ordered]@{}
-Get-ChildItem $project -Recurse -File | Where-Object { $_.FullName -notmatch '\\(bin|obj|\.vs)\\' } | ForEach-Object {
+# Never the build output or the local Git history (.git).
+Get-ChildItem $project -Recurse -File -Force | Where-Object { $_.FullName -notmatch '\\(bin|obj|\.vs|\.git)\\' } | ForEach-Object {
     $files[$_.FullName.Substring($project.Length + 1).Replace('\', '/')] = $_.FullName
 }
 $files["pluginmaster.json"] = $pluginmaster

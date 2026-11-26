@@ -132,6 +132,14 @@ public class Configuration : IPluginConfiguration
     /// <summary>"!skipall": people can remove all of their own songs (playing, queued, waiting for approval).</summary>
     public bool AllowSkipAll { get; set; } = true;
 
+    // ---- Jukebox terminal ----
+
+    /// <summary>Other Tundy players can link their jukebox terminal to you and send songs (same rules as requests).</summary>
+    public bool AllowJukebox { get; set; } = true;
+
+    /// <summary>Your own jukebox playlists, saved on your PC.</summary>
+    public List<JukeboxPlaylist> JukeboxPlaylists { get; set; } = new();
+
     // ---- Downloads ----
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>

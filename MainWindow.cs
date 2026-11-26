@@ -1730,6 +1730,22 @@ public sealed partial class MainWindow : Window
             if (!on) ImGui.EndDisabled();
         }
 
+        if (Ui.Group("Jukebox terminal"))
+        {
+            var jukebox = cfg.AllowJukebox;
+            if (ImGui.Checkbox("Let other Tundy players send me songs from their jukebox terminal", ref jukebox)) { cfg.AllowJukebox = jukebox; changed = true; }
+            Ui.Help("Players who also run Tundy can right-click you, open their jukebox terminal, see what's playing and send "
+                    + "songs or whole playlists to your queue. The same rules as tell requests apply: who can request, approval, "
+                    + "the max songs per playlist and the playlist cooldown. Off: their terminal says your jukebox is off.");
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(Theme.Muted, "Your own terminal: right-click another player → \"Tundy: open jukebox terminal\", or target them and "
+                                           + "type /tundy jukebox. It only links to players who run Tundy too. The two Tundys talk through "
+                                           + "tells that are hidden from both chats.");
+            ImGui.PopTextWrapPos();
+            if (ImGui.Button("Open my jukebox terminal")) plugin.OpenJukebox(null, null);
+            Ui.Tooltip("Make and edit your playlists. To send them, open it on a player instead.");
+        }
+
         if (Ui.Group("Announce songs in chat"))
         {
         var announce = cfg.AnnounceSongs;
@@ -1979,7 +1995,7 @@ public sealed partial class MainWindow : Window
 
         if (Ui.Group("Chat commands"))
         {
-        ImGui.TextDisabled("/tundy  ·  mini  ·  play <link>  ·  skip  ·  stop  ·  retry  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
+        ImGui.TextDisabled("/tundy  ·  mini  ·  jukebox  ·  play <link>  ·  skip  ·  stop  ·  retry  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
 
         }
 

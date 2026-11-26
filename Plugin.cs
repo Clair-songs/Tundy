@@ -47,6 +47,13 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+    [PluginService] internal static IContextMenu ContextMenu { get; private set; } = null!;
+    [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
+
+    private readonly JukeboxWindow jukeboxWindow;
+
+    /// <summary>Dalamud's monospace font, for the jukebox terminal's labels.</summary>
+    public IFontHandle MonoFont => PluginInterface.UiBuilder.MonoFontHandle;
 
     /// <summary>Song covers for the player (YouTube thumbnails).</summary>
     public CoverArt Covers { get; }
@@ -152,10 +159,14 @@ public sealed partial class Plugin : IDalamudPlugin
             tk.AttachExtraGlyphsForDalamudLanguage(new SafeFontConfig { SizePx = size, MergeFont = font });
         }));
 
+        Jukebox = new JukeboxClient(this);
         mainWindow = new MainWindow(this);
         miniWindow = new MiniPlayerWindow(this) { IsOpen = Config.ShowMiniPlayer };
+        jukeboxWindow = new JukeboxWindow(this);
         windows.AddWindow(mainWindow);
         windows.AddWindow(miniWindow);
+        windows.AddWindow(jukeboxWindow);
+        ContextMenu.OnMenuOpened += OnContextMenu;
 
         PluginInterface.UiBuilder.Draw += windows.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenSettings;
@@ -163,7 +174,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(MainCommand, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open the Tundy control panel. Subcommands: mini, play <link>, skip, stop, retry, approve [all], import, on, off, share, vol <0-100>, mute",
+            HelpMessage = "Open the Tundy control panel. Subcommands: mini, jukebox, play <link>, skip, stop, retry, approve [all], import, on, off, share, vol <0-100>, mute",
         });
 
         Chat.ChatMessage += OnChatMessage;
@@ -975,6 +986,9 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void OnChatMessage(IHandleableChatMessage message)
     {
+        // The jukebox link's tells (both ways) are hidden and handled first.
+        if (message.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing && HandleJukeboxTell(message))
+            return;
         if (message.LogKind != XivChatType.TellIncoming)
             return;
         if (TellTunesLoaded)
@@ -1123,13 +1137,23 @@ public sealed partial class Plugin : IDalamudPlugin
     public void Approve(Guid id)
     {
         if (Pending.Take(id) is not { } r) return;
-        Accept(r.EncodedSender, r.Sender, r.Url, r.Playlist, r.SpotifyId, force: true, approved: true, r.Shuffle);
+        AcceptApproved(r);
     }
 
     public void ApproveAll()
     {
-        foreach (var r in Pending.TakeAll())
-            Accept(r.EncodedSender, r.Sender, r.Url, r.Playlist, r.SpotifyId, force: true, approved: true, r.Shuffle);
+        foreach (var r in Pending.TakeAll()) AcceptApproved(r);
+    }
+
+    private void AcceptApproved(PendingRequest r)
+    {
+        if (r.JukeboxIds != null)
+        {
+            EnqueueJukebox(r.EncodedSender, r.Sender, r.JukeboxIds);
+            Replier.Send(r.EncodedSender, r.Sender, $"Your {r.JukeboxIds.Count} jukebox song{(r.JukeboxIds.Count == 1 ? " was" : "s were")} approved.");
+            return;
+        }
+        Accept(r.EncodedSender, r.Sender, r.Url, r.Playlist, r.SpotifyId, force: true, approved: true, r.Shuffle);
     }
 
     public void Reject(Guid id)
@@ -1246,6 +1270,12 @@ public sealed partial class Plugin : IDalamudPlugin
             case "mini":
                 SetMiniPlayer(!miniWindow.IsOpen);
                 break;
+            case "jukebox":
+                if (TargetManager.Target is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter pc && pc.Address != ObjectTable.LocalPlayer?.Address)
+                    OpenJukebox(pc.Name.TextValue, pc.HomeWorld.ValueNullable?.Name.ExtractText());
+                else
+                    OpenJukebox(null, null); // just your playlists, until you pick someone
+                break;
             case "import":
                 mainWindow.IsOpen = true;
                 mainWindow.SelectImportTab();
@@ -1304,8 +1334,32 @@ public sealed partial class Plugin : IDalamudPlugin
             Chat.Print($"[Tundy] {text}");
     }
 
+    /// <summary>Opens the jukebox terminal, linked to this player (or just your playlists when there's nobody).</summary>
+    public void OpenJukebox(string? name, string? world)
+    {
+        if (name == null) jukeboxWindow.IsOpen = true;
+        else jukeboxWindow.OpenFor(name, world);
+    }
+
+    /// <summary>"Tundy: open jukebox terminal" when you right-click another player.</summary>
+    private void OnContextMenu(Dalamud.Game.Gui.ContextMenu.IMenuOpenedArgs args)
+    {
+        if (args.MenuType != Dalamud.Game.Gui.ContextMenu.ContextMenuType.Default) return;
+        if (args.Target is not Dalamud.Game.Gui.ContextMenu.MenuTargetDefault t) return;
+        var name = t.TargetName;
+        var world = t.TargetHomeWorld.ValueNullable?.Name.ExtractText();
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(world) || t.TargetHomeWorld.RowId == 0) return;
+        if (Names.Same(name, ObjectTable.LocalPlayer?.Name.TextValue ?? "")) return;
+        args.AddMenuItem(new Dalamud.Game.Gui.ContextMenu.MenuItem
+        {
+            Name = "Tundy: open jukebox terminal",
+            OnClicked = _ => OpenJukebox(name, world),
+        });
+    }
+
     public void Dispose()
     {
+        ContextMenu.OnMenuOpened -= OnContextMenu;
         Chat.ChatMessage -= OnChatMessage;
         CommandManager.RemoveHandler(MainCommand);
         PluginInterface.UiBuilder.Draw -= windows.Draw;
