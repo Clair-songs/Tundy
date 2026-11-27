@@ -102,6 +102,14 @@ foreach ($path in $files.Keys) {
     $tree += @{ path = $path; mode = "100644"; type = "blob"; sha = $blob.sha }
     Write-Host "  $path"
 }
+# Files deleted here are deleted there too (the commit builds on the repository's last tree, which still has them).
+$remote = Invoke-Gh GET "repos/$Owner/$Repo/git/trees/$($baseTree)?recursive=1" $null
+foreach ($item in $remote.tree) {
+    if ($item.type -eq "blob" -and -not $files.Contains($item.path)) {
+        $tree += @{ path = $item.path; mode = "100644"; type = "blob"; sha = $null }
+        Write-Host "  (removed) $($item.path)"
+    }
+}
 $newTree = Invoke-Gh POST "repos/$Owner/$Repo/git/trees" @{ base_tree = $baseTree; tree = $tree }
 if ($Message -eq "") { $Message = "Tundy $($manifest.AssemblyVersion)" }
 $commit = Invoke-Gh POST "repos/$Owner/$Repo/git/commits" @{ message = $Message; tree = $newTree.sha; parents = @($head) }
