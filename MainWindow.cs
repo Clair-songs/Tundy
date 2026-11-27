@@ -611,6 +611,15 @@ public sealed partial class MainWindow : Window
             ? "Music mod songs are stereo Vorbis: about 1.2 MB per minute of music, or about 0.7 MB smaller. Applies to songs downloaded after you change it."
             : "Normal: about 1.4 MB per minute of music. Smaller: about 0.7 MB. Applies to songs downloaded after you change it.");
 
+        if (sharer.UsesMusicMod)
+        {
+            var opus = cfg.SharePreferOpus;
+            if (ImGui.Checkbox("Better sound: use YouTube's Opus audio for shared songs", ref opus)) { cfg.SharePreferOpus = opus; changed = true; }
+            Ui.Help("YouTube offers each song as AAC and as Opus, both about 130 kbit/s; Opus sounds a bit better at that size. "
+                    + "Shared songs are converted anyway, so Tundy downloads the Opus version for that (a few MB more per song). "
+                    + "Your own player keeps using the AAC file. Songs without an Opus version use AAC, as before.");
+        }
+
         ImGui.Spacing();
         if (ImGui.Button($"Do {sharer.Emote.Command} now"))
             _ = sharer.PerformEmoteAsync();

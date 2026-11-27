@@ -497,8 +497,24 @@ public sealed class SongSharer : IDisposable
         return (files, bytes);
     }
 
+    /// <summary>
+    /// True when the next song will be built as streamed Vorbis music (a music mod's song slot), the only case where a
+    /// better source than the AAC download helps: ffmpeg reads any format, the ADPCM sound-effect path doesn't.
+    /// </summary>
+    public bool BuildsMusic()
+    {
+        try
+        {
+            var emote = Emote;
+            return emote.Routes != null && MusicModScanner.IsVorbis(music.TemplateFor(emote.ScdPath, ModFolderName));
+        }
+        catch { return false; }
+    }
+
     /// <summary>Converts a downloaded song into a game sound file for the chosen emote or music mod slot.</summary>
-    public string BuildScd(string audioFile, CancellationToken ct)
+    /// <param name="audioFile">The downloaded song (AAC, which Windows can read).</param>
+    /// <param name="musicSource">A better source for Vorbis music (YouTube's Opus audio), or null to use <paramref name="audioFile"/>.</param>
+    public string BuildScd(string audioFile, CancellationToken ct, string? musicSource = null)
     {
         var emote = Emote;
         var template = emote.Routes != null
@@ -521,7 +537,8 @@ public sealed class SongSharer : IDisposable
             Status = ffmpegTool.CurrentPath == null ? "Downloading ffmpeg (once, about 120 MB)..." : Status;
             var ffmpeg = ffmpegTool.Get(ct);
             Status = "Converting song for sharing...";
-            var ogg = VorbisScd.EncodeOgg(ffmpeg, audioFile, config.ShareSmallerFiles ? 3 : 6, ct);
+            var source = musicSource != null && File.Exists(musicSource) ? musicSource : audioFile;
+            var ogg = VorbisScd.EncodeOgg(ffmpeg, source, config.ShareSmallerFiles ? 3 : 6, ct);
             scd = VorbisScd.Build(template, ogg, loopSilentTail: true);
             try { PrepareSilence(emote.ScdPath, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException) { Plugin.Log.Warning(ex, "Couldn't make the silent track"); }

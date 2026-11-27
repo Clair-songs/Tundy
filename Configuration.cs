@@ -132,6 +132,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>"!skipall": people can remove all of their own songs (playing, queued, waiting for approval).</summary>
     public bool AllowSkipAll { get; set; } = true;
 
+    /// <summary>Build shared music-mod songs from YouTube's Opus audio instead of its AAC (slightly better sound).</summary>
+    public bool SharePreferOpus { get; set; } = true;
+
     // ---- Jukebox terminal ----
 
     /// <summary>Other Tundy players can link their jukebox terminal to you and send songs (same rules as requests).</summary>

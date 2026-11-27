@@ -155,7 +155,18 @@ public sealed class YtDlp
     /// Picks an m4a/AAC stream so no ffmpeg is required for playback via Media Foundation.
     /// </summary>
     public Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem = null) =>
-        DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, Gentle);
+        DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, Gentle, AacFormat);
+
+    // YouTube's best AAC (m4a, about 130 kbit/s): Windows can play it without ffmpeg.
+    private const string AacFormat = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio";
+
+    /// <summary>
+    /// Downloads the video's Opus audio (webm, about 130 kbit/s: at that size it sounds better than the AAC version).
+    /// Windows can't play it, so it's only used as the source when ffmpeg converts a song for sharing. Throws when
+    /// the video has no Opus version (rare); the caller then uses the AAC file.
+    /// </summary>
+    public Task<SongDownload> DownloadOpusAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct) =>
+        DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, Guid.NewGuid().ToString("N") + "-opus", Gentle, "bestaudio[acodec=opus]");
 
     /// <summary>
     /// Download gently: one piece at a time and longer waits between yt-dlp's own retries. Turned on for the rest of
@@ -165,7 +176,7 @@ public sealed class YtDlp
     /// </summary>
     public bool Gentle { get; private set; }
 
-    private async Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem, bool gentle)
+    private async Task<SongDownload> DownloadAudioAsync(string url, string outDir, int maxDurationSeconds, CancellationToken ct, string? fileStem, bool gentle, string format)
     {
         await EnsureInstalledAsync(ct);
         Directory.CreateDirectory(outDir);
@@ -194,7 +205,7 @@ public sealed class YtDlp
         args.AddRange(new[]
         {
             "--match-filter", $"duration <= {maxDurationSeconds} & !is_live",
-            "-f", "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio",
+            "-f", format,
             "-o", template,
             "--print", "after_move:%(title)s\t%(artist)s\t%(track)s\t%(duration)s",
             "--print", "after_move:filepath",
@@ -219,7 +230,7 @@ public sealed class YtDlp
                 {
                     ForceIpv4 = true;
                     Plugin.Log.Warning($"YouTube refused the download of {url} ({RetryPolicy.Short(reason)}). Trying again over IPv4.");
-                    return await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle);
+                    return await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle, format);
                 }
 
                 // 2. Still refused: wait a moment, then try gently (see Gentle). If that works, keep it for the session.
@@ -228,7 +239,7 @@ public sealed class YtDlp
                     Plugin.Log.Warning($"YouTube refused the download of {url} again ({RetryPolicy.Short(reason)}). "
                                        + "Trying gently: one piece at a time, with longer waits.");
                     await Task.Delay(TimeSpan.FromSeconds(5), ct);
-                    var song = await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle: true);
+                    var song = await DownloadAudioAsync(url, outDir, maxDurationSeconds, ct, fileStem, gentle: true, format);
                     if (!Gentle)
                     {
                         Gentle = true;

@@ -560,14 +560,34 @@ public sealed class MusicPlayer : IDisposable
             string? scd = null;
             if (sharer.CanShare)
             {
+                // Shared as music-mod music: YouTube's Opus audio sounds a bit better than its AAC at the same size, and
+                // ffmpeg converts it anyway. Your own player keeps the AAC file (Windows can't play Opus).
+                string? opus = null;
+                if (config.SharePreferOpus && RetryPolicy.YouTubeId(target) != null && sharer.BuildsMusic())
+                {
+                    try
+                    {
+                        opus = (await ytDlp.DownloadOpusAsync(target, cacheDir, config.MaxDurationSeconds, ct)).File;
+                        Plugin.Log.Information($"Using YouTube's Opus audio for the shared copy of \"{title}\"");
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Plugin.Log.Information($"No Opus audio for \"{title}\", sharing the AAC version ({RetryPolicy.Short(ex.Message)})");
+                    }
+                }
+
                 try
                 {
-                    scd = await Task.Run(() => sharer.BuildScd(file, ct), ct);
+                    scd = await Task.Run(() => sharer.BuildScd(file, ct, opus), ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Plugin.Log.Warning(ex, "Could not prepare song for sharing");
                     notify($"Couldn't prepare \"{title}\" for sharing, playing it just for you. ({ex.Message})");
+                }
+                finally
+                {
+                    if (opus != null) DeleteFile(opus); // only needed for the conversion
                 }
             }
 

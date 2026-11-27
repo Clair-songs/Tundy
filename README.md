@@ -151,6 +151,10 @@ Limits:
 - Seeking is off while sharing, because it can't change the in-game copy. Skip and stop work.
 - Music mod songs are stereo Ogg Vorbis like the mod's own tracks (about 1.2 MB per minute), made with ffmpeg.
   Emote songs are mono ADPCM (about 1.4 MB per minute, 0.7 MB with "Smaller files").
+- For music mod songs, Tundy also downloads YouTube's Opus version of the song and converts that (Sharing → "Better
+  sound", on by default): Opus sounds a bit better than YouTube's AAC at the same size (about 130 kbit/s each, the best
+  YouTube offers without Premium). Your own player keeps the AAC file, since Windows can't play Opus; songs without an
+  Opus version, and songs replayed from the saved copies, use AAC.
 - The music mod's song slot only plays looping sounds. Tundy adds 4 seconds of silence to the end of each song and
   loops only that, so the song plays once and then stays quiet while you keep dancing.
 - If you're still dancing when the next song is ready, the dance keeps going: Tundy puts the song on without a
