@@ -141,6 +141,15 @@ public sealed partial class MainWindow
         ImGui.InputText("##guideCmd", ref guideCommand, 24);
         Ui.Help("One word, no spaces, like !q or !play. You can add more commands later in People.");
         if (guideCommandError.Length > 0) ImGui.TextColored(Theme.Bad, guideCommandError);
+
+        ImGui.Spacing();
+        ImGui.Spacing();
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("Look");
+        ImGui.SameLine();
+        if (DrawThemePicker("##guideTheme")) plugin.SaveConfig();
+        Ui.Help("Pastel purple (the default), Minimal (near-black and greys) or Dalamud's own colours. Only Tundy's windows "
+                + "change. It's also in Settings → Look.");
     }
 
     /// <summary>Checks and saves what the step asks for. False keeps the guide on this step.</summary>
@@ -181,8 +190,8 @@ public sealed partial class MainWindow
         var share = cfg.ShareViaLightless ? 1 : 0;
         var changed = GuideRadio("Just me", "Songs play in Tundy's own player. Nothing else is needed.", ref share, 0);
         changed |= GuideRadio("Me and my Lightless pairs nearby",
-            "Songs play from your character in the game through the Mega Music Mod's DJ dance, and Lightless Sync sends them "
-            + "to the people you're paired with. They only need Lightless.", ref share, 1);
+            "Songs play from your character in the game through your music mod's dance (the Mega Music Mod, or another one "
+            + "you pick below), and Lightless Sync sends them to the people you're paired with. They only need Lightless.", ref share, 1);
         if (changed)
         {
             cfg.ShareViaLightless = share == 1;
@@ -191,6 +200,7 @@ public sealed partial class MainWindow
 
         if (share == 1)
         {
+            if (plugin.Sharer.UsesMusicMod) DrawGuideMusicMod();
             Ui.BeginCard();
             DrawSetupSteps(inGuide: true);
             Ui.EndCard();
@@ -198,6 +208,35 @@ public sealed partial class MainWindow
                 "The first time a song is shared, your character does the emote once with its normal sound so Lightless learns "
                 + "the file. That's expected. Each song then waits a few seconds so your pairs can download it.");
         }
+    }
+
+    /// <summary>Which music mod plays the songs: the Mega Music Mod, or any other dance or music mod you have.</summary>
+    private void DrawGuideMusicMod()
+    {
+        var music = plugin.Music;
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("Music mod");
+        ImGui.SameLine();
+        if (DrawMusicModPicker("##guideMod", 300 * ImGuiHelpers.GlobalScale)) plugin.SaveConfig();
+        Ui.Help("The Penumbra mod whose dance plays the songs. The Mega Music Mod is recommended, but any other dance or "
+                + "music mod you have works too.");
+        if (music.IsRecommended) return;
+
+        if (music.InstalledMega() is { } mega)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Use Mega Music Mod"))
+            {
+                music.UseMod(mega);
+                scannedRoutes = null;
+                plugin.SaveConfig();
+            }
+        }
+        ImGui.TextColored(Theme.Muted, music.Scanning || music.Scan == null
+            ? "Reading the mod's dances..."
+            : $"{music.ScanStatus} Tundy uses the dance that's turned on in Penumbra; you can pick another later in Sharing → Music mod.");
+        if (music.Scan == null && !music.Scanning) music.StartScan();
+        ImGui.Spacing();
     }
 
     // ---- 3. Extras
@@ -217,6 +256,11 @@ public sealed partial class MainWindow
         var reply = cfg.ReplyQueuePosition;
         if (ImGui.Checkbox("Tell people where their song is in the queue", ref reply)) { cfg.ReplyQueuePosition = reply; changed = true; }
         GuideNote("A short /tell back, like \"Your song is up next!\", and how long to wait before another playlist.");
+
+        var why = cfg.ReplyWhyRejected;
+        if (ImGui.Checkbox("Tell people why a link can't play", ref why)) { cfg.ReplyWhyRejected = why; changed = true; }
+        GuideNote("A short /tell back when a link is private, removed, age-restricted, blocked in your region, too long or a "
+                  + "live stream, so they can send another one.");
 
         var available = plugin.Honorific.Available;
         if (!available) ImGui.BeginDisabled();
@@ -252,6 +296,15 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted(line);
         ImGui.SameLine();
         if (Ui.IconButton("copyLine", FontAwesomeIcon.Copy, "Copy")) ImGui.SetClipboardText(line);
+
+        // The other things they can send (as you have them set up).
+        var cfg = plugin.Config;
+        var more = new System.Collections.Generic.List<string>();
+        if (cfg.SkipPermission > 0)
+            more.Add(cfg.SkipPermission == 1 ? "\"!skip\" to skip their own song while it plays" : "\"!skip\" to skip the song that's playing");
+        if (cfg.AllowSkipAll) more.Add("\"!skipall\" to remove all of their own songs");
+        if (more.Count > 0)
+            ImGui.TextColored(Theme.Muted, $"They can also send you {string.Join(", and ", more)}. You can change this later in Settings → Skipping.");
 
         if (plugin.ImportNotes.Count > 0)
         {

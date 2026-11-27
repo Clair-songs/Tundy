@@ -174,40 +174,6 @@ added yourself never count as theirs. It's on by default ("Let people remove all
 works even when `!skip` is set to nobody; the same 10-second wait applies, and blocked people can't use it. With replies
 on they're told how many were removed.
 
-## Jukebox terminal (Tundy to Tundy)
-Right-click another player and pick **Tundy: open jukebox terminal** (or target them and type `/tundy jukebox`). If they run
-Tundy too, the terminal links to theirs and shows what's playing, how long their queue is, and their rules (approval,
-cooldown, max songs per send). If they don't, it says LINK FAILED: it only works between two Tundys.
-
-- **Your playlists**, saved on your PC: make, rename (double-click), duplicate and delete them; add songs by pasting a
-  YouTube or Spotify link or by searching YouTube; reorder or remove songs. Names and lengths are filled in for you.
-- **Playlist links**: paste a YouTube playlist or a Spotify playlist or album, then **+ Add all** (into the selected
-  playlist; songs already in it are skipped), **+ New playlist** (when none is selected: one named after it), or
-  **Send** to send its songs straight to their queue (up to their max per send). A song link copied while watching a
-  YouTube playlist (`watch?v=...&list=...`) offers to add the whole playlist too (not YouTube's endless Mixes).
-- **Send to their queue** or **Shuffle & send**: their Tundy treats it like a playlist request from you, so their rules
-  apply (who can request, approval, max songs per playlist, playlist cooldown). With approval, it waits on their Now
-  playing tab as one "Jukebox: N songs" request.
-- **Single songs**: paste a link or search, then press **Send** (or the play button on a search result or a playlist song)
-  to send just that song; no playlist needed.
-- **Their queue** tab: what's playing and the songs waiting on their side (names and lengths filled in), with a button to
-  copy a song into your playlist and **Save as a playlist**. Their "now playing" updates by itself when their song
-  changes.
-- The link's tells are hidden before other plugins see them, so chat-bubble plugins don't show anything for them.
-- The game's own chat bubbles: with bubbles on for tells, each hidden tell made a bubble that repeated the person's last
-  message. Tundy now hides that bubble on both players' screens (Settings → Jukebox terminal → "Hide the chat bubbles
-  these hidden tells cause", on by default). A real message sent in that same second may lose its bubble too; the chat
-  log always keeps it.
-- Fewer tells: your terminal tells their Tundy when you close it, so the "now playing" updates stop, and after you send
-  songs their Tundy answers with fresh info by itself instead of being asked again.
-- The terminal uses your Tundy theme (pastel, minimal or Dalamud's own look).
-
-How it talks: there's no other channel between two players' plugins, so the two Tundys use tells. Each tell starts with
-`~tdy1` and both Tundys hide those tells from chat. Songs travel as short YouTube/Spotify ids, about 35 per tell, so a
-playlist is one tell (or a few for big ones), spaced out like Tundy's other replies. It works wherever you could send
-them a tell. To stop other players' terminals from sending you songs, untick Settings → Jukebox terminal → "Let other
-Tundy players send me songs".
-
 ## Replying to requesters (optional, off by default)
 Settings → **Reply to requesters**: after a request is accepted, the requester gets a tell such as "Your song is up
 next!" or "Your song is in the queue. 3 songs play before it." It's sent with `/tell Name@World` to that exact
@@ -266,9 +232,11 @@ Honorific see it a few seconds later. By default it only shows while the song is
 
 ## First start
 On a new setup, `/tundy` opens a short welcome guide (Settings → Look → Open the welcome guide again brings it
-back): 1) who can send you songs (approval first is preselected) and the request command, 2) who hears the music (just you,
-or your Lightless pairs too, with the same checks, "Set it up for me" and **Test now** as the Sharing tab), 3) a few extras
-(announce songs, replies, the Honorific title), 4) paste a first song and copy the line to give your friends. Song requests
+back): 1) who can send you songs (approval first is preselected), the request command and the theme, 2) who hears the
+music (just you, or your Lightless pairs too, with a box to pick your music mod: the Mega Music Mod or any other dance or
+music mod, plus the same checks, "Set it up for me" and **Test now** as the Sharing tab), 3) a few extras (announce songs,
+queue replies, telling people why a link can't play, the Honorific title), 4) paste a first song and copy the line to give
+your friends, with a note on `!skip` and `!skipall` as you have them set up. Song requests
 stay paused until you finish it, so nobody's link plays before you've picked who can send them. While yt-dlp, deno and
 ffmpeg download the first time, a **Getting ready** card shows each one (ffmpeg only when you share through the music mod).
 Existing setups don't see the guide and keep their settings.
@@ -295,7 +263,7 @@ on small status dots), or **Dalamud's own look**. The mini player and the welcom
 progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing
 window, or right-click the window): cover, name, a thin time bar, skip and the next song, without a title bar.
 
-Chat commands: `/tundy mini | jukebox | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
+Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
 
 ## Sharing Tundy with other people
 `dotnet build -c Release` makes `bin\Release\Tundy\latest.zip` (the plugin and everything it needs) and

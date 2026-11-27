@@ -135,17 +135,6 @@ public class Configuration : IPluginConfiguration
     /// <summary>Build shared music-mod songs from YouTube's Opus audio instead of its AAC (slightly better sound).</summary>
     public bool SharePreferOpus { get; set; } = true;
 
-    // ---- Jukebox terminal ----
-
-    /// <summary>Other Tundy players can link their jukebox terminal to you and send songs (same rules as requests).</summary>
-    public bool AllowJukebox { get; set; } = true;
-
-    /// <summary>Your own jukebox playlists, saved on your PC.</summary>
-    public List<JukeboxPlaylist> JukeboxPlaylists { get; set; } = new();
-
-    /// <summary>Hide the game's chat bubble that a jukebox-link tell causes (it shows the person's previous message again).</summary>
-    public bool HideLinkTellBubbles { get; set; } = true;
-
     // ---- Downloads ----
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>

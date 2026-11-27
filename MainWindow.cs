@@ -760,6 +760,36 @@ public sealed partial class MainWindow : Window
     /// any other mod a scan of its dances (follow the one on in Penumbra, or pick one), or by hand. Returns true if a
     /// setting changed.
     /// </summary>
+    /// <summary>The music mod box: search your Penumbra mods and pick the one that plays the songs. True when one was picked.</summary>
+    private bool DrawMusicModPicker(string label, float width)
+    {
+        var cfg = plugin.Config;
+        var music = plugin.Music;
+        ImGui.SetNextItemWidth(width);
+        var modItems = music.ModList().Where(m => !m.Key.Equals("Tundy Song", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(m => (m.Key, m.Value == m.Key ? m.Value : $"{m.Value} ({m.Key})"));
+        if (!Ui.SearchCombo(label, cfg.QueueTargetMod, cfg.QueueTargetMod, modItems, ref modSearch, out var pickedMod, "Search your mods")
+            || pickedMod == cfg.QueueTargetMod)
+            return false;
+        music.UseMod(pickedMod!);
+        scannedRoutes = null;
+        otherModResult = string.Empty;
+        return true;
+    }
+
+    /// <summary>The theme box (pastel, minimal, Dalamud's). True when it changed.</summary>
+    private bool DrawThemePicker(string label)
+    {
+        var cfg = plugin.Config;
+        string[] looks = { "Pastel purple", "Minimal", "Dalamud's own look" };
+        var look = Math.Clamp((int)cfg.ThemeChoice, 0, looks.Length - 1);
+        ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
+        if (!ImGui.Combo(label, ref look, looks, looks.Length)) return false;
+        cfg.ThemeChoice = (ThemeStyle)look;
+        return true;
+    }
+
     private bool DrawMusicModGroup()
     {
         var cfg = plugin.Config;
@@ -768,18 +798,7 @@ public sealed partial class MainWindow : Window
         var scale = ImGuiHelpers.GlobalScale;
 
         // Which mod
-        ImGui.SetNextItemWidth(320 * scale);
-        var modItems = music.ModList().Where(m => !m.Key.Equals("Tundy Song", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase)
-            .Select(m => (m.Key, m.Value == m.Key ? m.Value : $"{m.Value} ({m.Key})"));
-        if (Ui.SearchCombo("Mod##musicMod", cfg.QueueTargetMod, cfg.QueueTargetMod, modItems, ref modSearch, out var pickedMod, "Search your mods")
-            && pickedMod != cfg.QueueTargetMod)
-        {
-            music.UseMod(pickedMod!);
-            scannedRoutes = null;
-            otherModResult = string.Empty;
-            changed = true;
-        }
+        changed |= DrawMusicModPicker("Mod##musicMod", 320 * scale);
         Ui.Help("The Penumbra mod whose dance plays the songs: the Mega Music Mod (recommended), or any other dance or music mod.");
         if (!music.IsRecommended && music.InstalledMega() is { } mega)
         {
@@ -1634,10 +1653,7 @@ public sealed partial class MainWindow : Window
 
         if (Ui.Group("Look"))
         {
-            string[] looks = { "Pastel purple", "Minimal", "Dalamud's own look" };
-            var look = Math.Clamp((int)cfg.ThemeChoice, 0, looks.Length - 1);
-            ImGui.SetNextItemWidth(200 * ImGuiHelpers.GlobalScale);
-            if (ImGui.Combo("Theme", ref look, looks, looks.Length)) { cfg.ThemeChoice = (ThemeStyle)look; changed = true; }
+            changed |= DrawThemePicker("Theme");
             Ui.Help("Pastel purple: dark plum with lavender, mint and pink. Minimal: near-black and greys, with colour only on small "
                     + "status dots. Dalamud's own look: Dalamud's normal colours. Only Tundy's windows change.");
             var covers = cfg.ShowCoverArt;
@@ -1737,27 +1753,6 @@ public sealed partial class MainWindow : Window
                 : $"Preview: 《{hon.Format(sample)}》");
             if (hon.Status.Length > 0) ImGui.TextDisabled(hon.Status);
             if (!on) ImGui.EndDisabled();
-        }
-
-        if (Ui.Group("Jukebox terminal"))
-        {
-            var jukebox = cfg.AllowJukebox;
-            if (ImGui.Checkbox("Let other Tundy players send me songs from their jukebox terminal", ref jukebox)) { cfg.AllowJukebox = jukebox; changed = true; }
-            Ui.Help("Players who also run Tundy can right-click you, open their jukebox terminal, see what's playing and send "
-                    + "songs or whole playlists to your queue. The same rules as tell requests apply: who can request, approval, "
-                    + "the max songs per playlist and the playlist cooldown. Off: their terminal says your jukebox is off.");
-            ImGui.PushTextWrapPos();
-            ImGui.TextColored(Theme.Muted, "Your own terminal: right-click another player → \"Tundy: open jukebox terminal\", or target them and "
-                                           + "type /tundy jukebox. It only links to players who run Tundy too. The two Tundys talk through "
-                                           + "tells that are hidden from both chats.");
-            ImGui.PopTextWrapPos();
-            var bubbles = cfg.HideLinkTellBubbles;
-            if (ImGui.Checkbox("Hide the chat bubbles these hidden tells cause", ref bubbles)) { cfg.HideLinkTellBubbles = bubbles; changed = true; }
-            Ui.Help("With the game's chat bubbles on for tells, each hidden jukebox tell makes a bubble that repeats the "
-                    + "person's last message. Tundy hides that bubble on your screen (theirs does the same on theirs). "
-                    + "A real message sent in the same second may lose its bubble too; it still shows in chat.");
-            if (ImGui.Button("Open my jukebox terminal")) plugin.OpenJukebox(null, null);
-            Ui.Tooltip("Make and edit your playlists. To send them, open it on a player instead.");
         }
 
         if (Ui.Group("Announce songs in chat"))
@@ -2009,7 +2004,7 @@ public sealed partial class MainWindow : Window
 
         if (Ui.Group("Chat commands"))
         {
-        ImGui.TextDisabled("/tundy  ·  mini  ·  jukebox  ·  play <link>  ·  skip  ·  stop  ·  retry  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
+        ImGui.TextDisabled("/tundy  ·  mini  ·  play <link>  ·  skip  ·  stop  ·  retry  ·  approve [all]  ·  import  ·  on  ·  off  ·  share  ·  mute  ·  vol <0-100>");
 
         }
 

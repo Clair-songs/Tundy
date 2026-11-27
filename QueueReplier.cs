@@ -103,36 +103,6 @@ public sealed partial class QueueReplier
         });
     }
 
-    /// <summary>
-    /// Sends a tell to "Name@World" no matter the reply settings, with the same spacing as replies (for the jukebox
-    /// link between two Tundys). Line breaks are removed; nothing else is changed.
-    /// </summary>
-    public void SendRawTo(string nameAtWorld, string text)
-    {
-        var command = $"/tell {nameAtWorld} {text.Replace('\n', ' ').Replace('\r', ' ')}";
-        framework.RunOnFrameworkThread(() =>
-        {
-            var wait = TimeSpan.FromSeconds(2) - (DateTime.Now - lastSent);
-            if (wait > TimeSpan.Zero)
-            {
-                framework.RunOnTick(() => SendNow(command, quiet: true), wait);
-                lastSent = DateTime.Now + wait;
-            }
-            else
-            {
-                SendNow(command, quiet: true);
-                lastSent = DateTime.Now;
-            }
-        });
-    }
-
-    private void SendNow(string command, bool quiet)
-    {
-        try { SongSharer.SendChatCommand(command); }
-        catch (Exception ex) { Plugin.Log.Warning(ex, "Jukebox tell failed"); }
-        if (!quiet) LastResult = $"Sent: {command}";
-    }
-
     private void SendNow(string command)
     {
         try
