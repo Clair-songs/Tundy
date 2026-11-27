@@ -143,6 +143,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Your own jukebox playlists, saved on your PC.</summary>
     public List<JukeboxPlaylist> JukeboxPlaylists { get; set; } = new();
 
+    /// <summary>Hide the game's chat bubble that a jukebox-link tell causes (it shows the person's previous message again).</summary>
+    public bool HideLinkTellBubbles { get; set; } = true;
+
     // ---- Downloads ----
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>

@@ -49,6 +49,7 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IContextMenu ContextMenu { get; private set; } = null!;
     [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
 
     private readonly JukeboxWindow jukeboxWindow;
 
@@ -60,6 +61,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     /// <summary>The song as your character's title, through the Honorific plugin.</summary>
     public HonorificTitle Honorific { get; }
+    private readonly BubbleGuard bubbleGuard;
 
     /// <summary>A bigger font for the song's name in the player.</summary>
     public IFontHandle TitleFont { get; }
@@ -160,6 +162,7 @@ public sealed partial class Plugin : IDalamudPlugin
         }));
 
         Jukebox = new JukeboxClient(this);
+        bubbleGuard = new BubbleGuard(AddonLifecycle, Framework, ObjectTable, () => Config.HideLinkTellBubbles);
         mainWindow = new MainWindow(this);
         miniWindow = new MiniPlayerWindow(this) { IsOpen = Config.ShowMiniPlayer };
         jukeboxWindow = new JukeboxWindow(this);
@@ -715,7 +718,7 @@ public sealed partial class Plugin : IDalamudPlugin
     // ------------------------------------------------------------------ links
 
     /// <summary>Recognizes YouTube playlist links and Spotify playlist/album links.</summary>
-    private static PlaylistLink? ParsePlaylist(string url)
+    internal static PlaylistLink? ParsePlaylist(string url)
     {
         var yt = YouTubePlaylistRegex().Match(url);
         if (yt.Success) return new PlaylistLink("youtube", yt.Groups["list"].Value, url);
@@ -1372,6 +1375,7 @@ public sealed partial class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= OpenSettings;
         PluginInterface.UiBuilder.OpenMainUi -= mainWindow.Toggle;
         windows.RemoveAllWindows();
+        bubbleGuard.Dispose();
         Honorific.Dispose();
         Player.Dispose();
         Sharer.Dispose();

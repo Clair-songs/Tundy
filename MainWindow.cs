@@ -1751,6 +1751,11 @@ public sealed partial class MainWindow : Window
                                            + "type /tundy jukebox. It only links to players who run Tundy too. The two Tundys talk through "
                                            + "tells that are hidden from both chats.");
             ImGui.PopTextWrapPos();
+            var bubbles = cfg.HideLinkTellBubbles;
+            if (ImGui.Checkbox("Hide the chat bubbles these hidden tells cause", ref bubbles)) { cfg.HideLinkTellBubbles = bubbles; changed = true; }
+            Ui.Help("With the game's chat bubbles on for tells, each hidden jukebox tell makes a bubble that repeats the "
+                    + "person's last message. Tundy hides that bubble on your screen (theirs does the same on theirs). "
+                    + "A real message sent in the same second may lose its bubble too; it still shows in chat.");
             if (ImGui.Button("Open my jukebox terminal")) plugin.OpenJukebox(null, null);
             Ui.Tooltip("Make and edit your playlists. To send them, open it on a player instead.");
         }

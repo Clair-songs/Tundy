@@ -62,10 +62,12 @@ public sealed class JukeboxWindow : Window
     {
         searchResults = Array.Empty<YouTubeResult>();
         searchStatus = string.Empty;
+        Link.Sleep(); // their Tundy stops sending "now playing" updates until the terminal is open again
     }
 
     public override void Draw()
     {
+        while (uiWork.TryDequeue(out var work)) work();
         Link.Tick();
         DrawScanlines();
         DrawHeader();
@@ -313,11 +315,26 @@ public sealed class JukeboxWindow : Window
     {
         // Add or send: a link, or a YouTube search (works with or without a playlist)
         var p = Current;
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 150 * ImGuiHelpers.GlobalScale);
-        var enter = ImGui.InputTextWithHint("##add", "> paste a YouTube or Spotify link, or search YouTube", ref addInput, 300, ImGuiInputTextFlags.EnterReturnsTrue);
+        var playlistLink = Plugin.ParsePlaylist(addInput.Trim());
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - (playlistLink != null && p == null ? 210 : 150) * ImGuiHelpers.GlobalScale);
+        var enter = ImGui.InputTextWithHint("##add", "> paste a YouTube or Spotify link (song or playlist), or search YouTube", ref addInput, 300, ImGuiInputTextFlags.EnterReturnsTrue);
+        playlistLink = Plugin.ParsePlaylist(addInput.Trim());
         var link = LooksLikeLink(addInput);
         ImGui.SameLine();
-        if (link)
+        if (playlistLink != null)
+        {
+            // A YouTube playlist, or a Spotify playlist or album: all of its songs.
+            if (importing) ImGui.BeginDisabled();
+            if (ImGui.Button(p == null ? "+ New playlist" : "+ Add all") || (enter && !importing)) Import(playlistLink, p, send: false);
+            Ui.Tooltip(p == null ? "Make a new playlist with all of its songs." : $"Add all of its songs to \"{p.Name}\".");
+            ImGui.SameLine();
+            if (!CanSend) ImGui.BeginDisabled();
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Send")) Import(playlistLink, null, send: true);
+            if (!CanSend) ImGui.EndDisabled();
+            if (importing) ImGui.EndDisabled();
+            SendTooltip(Link.Info is { } inf ? $"Send its songs straight to their queue (they take up to {inf.MaxSongs} at a time)." : "Send its songs straight to their queue.");
+        }
+        else if (link)
         {
             if (p == null) ImGui.BeginDisabled();
             var add = ImGui.Button("+ Add") || (enter && p != null);
@@ -329,6 +346,14 @@ public sealed class JukeboxWindow : Window
             if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Send")) { SendSingle(addInput.Trim(), null, null); addInput = string.Empty; }
             if (!CanSend) ImGui.EndDisabled();
             SendTooltip("Send just this song to their queue.");
+            // A song opened from a playlist (watch?v=...&list=...): offer the whole playlist too.
+            if (ListInWatchLink(addInput) is { } fromList)
+            {
+                if (importing) ImGui.BeginDisabled();
+                if (ImGui.SmallButton(p == null ? "This song is from a playlist: make a playlist with all of it" : $"This song is from a playlist: add all of it to \"{p.Name}\""))
+                    Import(fromList, p, send: false);
+                if (importing) ImGui.EndDisabled();
+            }
         }
         else
         {
@@ -437,6 +462,101 @@ public sealed class JukeboxWindow : Window
             ImGui.PopID();
         }
         if (ImGui.SmallButton("Close results")) { searchResults = Array.Empty<YouTubeResult>(); searchStatus = string.Empty; }
+    }
+
+    // ---- playlist links
+
+    private volatile bool importing;
+    // Work from the background reader, done at the start of the next frame (the playlists are only changed while drawing).
+    private readonly ConcurrentQueue<Action> uiWork = new();
+
+    private static readonly System.Text.RegularExpressions.Regex WatchList =
+        new(@"[?&]list=(?<list>[\w-]{10,})", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The playlist in a "watch?v=...&amp;list=..." link (not YouTube's endless Mixes), or null.</summary>
+    private static PlaylistLink? ListInWatchLink(string s)
+    {
+        s = s.Trim();
+        if (!Plugin.YouTubeRegex().IsMatch(s)) return null;
+        var m = WatchList.Match(s);
+        if (!m.Success) return null;
+        var id = m.Groups["list"].Value;
+        if (id.StartsWith("RD", StringComparison.Ordinal)) return null; // a Mix: never ends
+        return new PlaylistLink("youtube", id, $"https://www.youtube.com/playlist?list={id}");
+    }
+
+    /// <summary>
+    /// Reads a playlist link's songs, then adds them to <paramref name="into"/> (or a new playlist named after it),
+    /// or with <paramref name="send"/> sends them straight to their queue.
+    /// </summary>
+    private void Import(PlaylistLink link, JukeboxPlaylist? into, bool send)
+    {
+        if (importing) return;
+        importing = true;
+        addInput = string.Empty;
+        searchResults = Array.Empty<YouTubeResult>();
+        searchStatus = "Reading the playlist...";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Their Tundy checks the length limit itself, so nothing is left out here for being long.
+                var c = await PlaylistReader.ReadAsync(link, plugin.YtDlp, 24 * 3600, default);
+                var songs = c.Songs
+                    .Select(s => new JukeboxSong
+                    {
+                        Url = s.YouTubeUrl ?? $"https://open.spotify.com/track/{s.Spotify!.Id}",
+                        Title = s.Title,
+                        Seconds = s.Seconds,
+                    })
+                    .Where(s => JukeboxProtocol.IdFor(s.Url) != null)
+                    .ToList();
+                var left = c.Total - songs.Count;
+                var note = left > 0 ? $" ({left} couldn't be used: live, private or not songs)" : "";
+                uiWork.Enqueue(() => Imported(c.Name, songs, into, send, note));
+            }
+            catch (Exception ex)
+            {
+                searchStatus = $"Couldn't read that playlist: {RetryPolicy.Short(ex.Message)}";
+                importing = false;
+            }
+        });
+    }
+
+    private void Imported(string name, List<JukeboxSong> songs, JukeboxPlaylist? into, bool send, string note)
+    {
+        importing = false;
+        if (songs.Count == 0) { searchStatus = "That playlist has no songs Tundy can use." + note; return; }
+
+        if (send)
+        {
+            if (!CanSend) { searchStatus = SendBlockedReason(); return; }
+            // Only what they'd take: fewer tells.
+            var max = Link.Info is { MaxSongs: > 0 } info ? info.MaxSongs : songs.Count;
+            Link.Send(songs.Take(max), shuffle: false);
+            searchStatus = $"Sending {Math.Min(max, songs.Count)} of {songs.Count} songs from \"{name}\"." + note;
+            return;
+        }
+
+        var p = into != null && Playlists.Contains(into) ? into : null;
+        if (p == null)
+        {
+            p = new JukeboxPlaylist { Name = name.Length > 0 ? name : $"Playlist {Playlists.Count + 1}" };
+            Playlists.Add(p);
+            selected = Playlists.Count - 1;
+        }
+        var have = p.Songs.Select(s => JukeboxProtocol.IdFor(s.Url)).ToHashSet();
+        var added = 0;
+        foreach (var s in songs)
+        {
+            if (!have.Add(JukeboxProtocol.IdFor(s.Url))) continue;
+            p.Songs.Add(s);
+            added++;
+        }
+        plugin.SaveConfig();
+        var dupes = songs.Count - added;
+        searchStatus = $"Added {added} song{(added == 1 ? "" : "s")} from \"{name}\" to \"{p.Name}\""
+                       + (dupes > 0 ? $" ({dupes} already in it)" : "") + "." + note;
     }
 
     private void SendSingle(string url, string? title, int? seconds) =>

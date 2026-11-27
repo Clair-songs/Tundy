@@ -181,6 +181,10 @@ cooldown, max songs per send). If they don't, it says LINK FAILED: it only works
 
 - **Your playlists**, saved on your PC: make, rename (double-click), duplicate and delete them; add songs by pasting a
   YouTube or Spotify link or by searching YouTube; reorder or remove songs. Names and lengths are filled in for you.
+- **Playlist links**: paste a YouTube playlist or a Spotify playlist or album, then **+ Add all** (into the selected
+  playlist; songs already in it are skipped), **+ New playlist** (when none is selected: one named after it), or
+  **Send** to send its songs straight to their queue (up to their max per send). A song link copied while watching a
+  YouTube playlist (`watch?v=...&list=...`) offers to add the whole playlist too (not YouTube's endless Mixes).
 - **Send to their queue** or **Shuffle & send**: their Tundy treats it like a playlist request from you, so their rules
   apply (who can request, approval, max songs per playlist, playlist cooldown). With approval, it waits on their Now
   playing tab as one "Jukebox: N songs" request.
@@ -190,6 +194,12 @@ cooldown, max songs per send). If they don't, it says LINK FAILED: it only works
   copy a song into your playlist and **Save as a playlist**. Their "now playing" updates by itself when their song
   changes.
 - The link's tells are hidden before other plugins see them, so chat-bubble plugins don't show anything for them.
+- The game's own chat bubbles: with bubbles on for tells, each hidden tell made a bubble that repeated the person's last
+  message. Tundy now hides that bubble on both players' screens (Settings → Jukebox terminal → "Hide the chat bubbles
+  these hidden tells cause", on by default). A real message sent in that same second may lose its bubble too; the chat
+  log always keeps it.
+- Fewer tells: your terminal tells their Tundy when you close it, so the "now playing" updates stop, and after you send
+  songs their Tundy answers with fresh info by itself instead of being asked again.
 - The terminal uses your Tundy theme (pastel, minimal or Dalamud's own look).
 
 How it talks: there's no other channel between two players' plugins, so the two Tundys use tells. Each tell starts with

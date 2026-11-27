@@ -40,10 +40,14 @@ public sealed partial class Plugin
         if (!JukeboxProtocol.IsProtocol(text)) return false;
         message.PreventOriginal();
         if (!process) return true;
-        if (message.LogKind != XivChatType.TellIncoming) return true; // our own outgoing link tells: just hide them
 
+        // For an outgoing tell the "sender" is who it went to.
         var encoded = message.Sender.Encode();
-        if (QueueReplier.Target(encoded) is not { } from) return true;
+        var other = QueueReplier.Target(encoded);
+        // The game still makes its chat bubble for this tell (over both of you), showing the previous message: hide it.
+        bubbleGuard.LinkTell(other?.Name);
+        if (message.LogKind != XivChatType.TellIncoming) return true; // our own outgoing link tells: just hide them
+        if (other is not { } from) return true;
         var who = from.World != null ? $"{from.Name}@{from.World}" : from.Name;
         var body = text[JukeboxProtocol.Prefix.Length..].Trim();
         var space = body.IndexOf(' ');
@@ -73,6 +77,10 @@ public sealed partial class Plugin
             case "q":
                 ReceiveJukeboxSongs(encoded, from.Name, who, rest);
                 break;
+            case "bye":
+                // Their terminal closed: no more "now playing" updates for it.
+                jukeboxListeners.Remove(who);
+                break;
             case "getq" when Config.AllowJukebox:
                 // The songs waiting, in play order (the one playing now is in "info").
                 var ids = Player.FullQueue().Select(q => JukeboxProtocol.IdFor(q.Request.Url)).OfType<string>().Distinct().Take(120).ToList();
@@ -84,8 +92,8 @@ public sealed partial class Plugin
 
     /// <summary>
     /// Dalamud's first look at every chat message, before other plugins' chat handlers: the jukebox link's tells are
-    /// handled and hidden here, so chat-bubble plugins and the like never see them (they showed a bubble with the
-    /// sender's previous message for them).
+    /// handled and hidden here, so chat-bubble plugins and the like never see them. The game's own chat bubble for
+    /// them is hidden by <see cref="BubbleGuard"/>.
     /// </summary>
     private void OnCheckMessageHandled(IHandleableChatMessage message)
     {
@@ -152,6 +160,8 @@ public sealed partial class Plugin
         var all = JukeboxProtocol.ParseIds(string.Join(',', batch.Parts));
         var answer = QueueJukeboxSongs(encoded, sender, all, batch.Shuffle);
         Replier.SendRawTo(who, JukeboxProtocol.Prefix + "ack " + answer);
+        // Fresh info right after (their terminal no longer asks for it with a "hi", which saves a tell each way).
+        Replier.SendRawTo(who, JukeboxProtocol.Info(InfoFor(sender, QueueReplier.Target(encoded)?.World)));
     }
 
     /// <summary>Queues (or puts up for approval) songs sent from a jukebox terminal. Returns the answer for it.</summary>

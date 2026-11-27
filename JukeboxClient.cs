@@ -50,9 +50,27 @@ public sealed class JukeboxClient
 
     public void Disconnect()
     {
+        Bye();
         State = LinkState.Idle;
         TargetName = TargetWorld = null;
         Info = null;
+    }
+
+    // The terminal was closed while linked: their Tundy was told to stop sending updates.
+    private bool asleep;
+
+    /// <summary>The terminal closed: tells their Tundy to stop sending "now playing" updates. The link is kept.</summary>
+    public void Sleep()
+    {
+        if (asleep || TargetName == null || State != LinkState.Linked) return;
+        Bye();
+        asleep = true;
+    }
+
+    private void Bye()
+    {
+        if (TargetName != null && State == LinkState.Linked && !asleep) plugin.Replier.SendRawTo(Who, JukeboxProtocol.Prefix + "bye");
+        asleep = false;
     }
 
     private void Hello()
@@ -61,12 +79,25 @@ public sealed class JukeboxClient
         plugin.Replier.SendRawTo(Who, JukeboxProtocol.Prefix + "hi");
     }
 
+    /// <summary>
+    /// Their Tundy sends fresh info by itself after taking songs (0.6.3 and later), so no "hi" is needed for it.
+    /// </summary>
+    private bool SendsInfoAfterAck =>
+        Info != null && Version.TryParse(Info.Version, out var v) && v >= new Version(0, 6, 3);
+
     /// <summary>Called every frame while the terminal is open: link timeout, and a refresh of their info now and then.</summary>
     public void Tick()
     {
+        if (asleep)
+        {
+            // Reopened: ask for fresh info (which also restarts their updates).
+            asleep = false;
+            if (State == LinkState.Linked) Hello();
+        }
         if (State == LinkState.Connecting && (DateTime.Now - sentAt).TotalSeconds > 10) State = LinkState.Failed;
-        // Their Tundy sends new info by itself when its song changes; this is only a fallback.
-        if (State == LinkState.Linked && (DateTime.Now - InfoAt).TotalSeconds > 30 && (DateTime.Now - sentAt).TotalSeconds > 30) Hello();
+        // Their Tundy sends new info by itself when its song changes; this is only a fallback (every 90 s, to keep
+        // the tells between you few).
+        if (State == LinkState.Linked && (DateTime.Now - InfoAt).TotalSeconds > 90 && (DateTime.Now - sentAt).TotalSeconds > 90) Hello();
         if (waitingForAck && (DateTime.Now - sentAt).TotalSeconds > 20)
         {
             waitingForAck = false;
@@ -174,7 +205,7 @@ public sealed class JukeboxClient
                     _ => ($"Not sent: {detail}.", false),
                 };
                 TheirQueueAt = DateTime.MinValue; // their queue changed
-                Hello();
+                if (!SendsInfoAfterAck) Hello(); // older Tundys don't send their info by themselves
                 break;
             case "qlist":
                 var p = rest.Split(' ', 2);
