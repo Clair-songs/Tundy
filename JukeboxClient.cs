@@ -39,6 +39,9 @@ public sealed class JukeboxClient
         TargetName = name;
         TargetWorld = world;
         Info = null;
+        TheirQueue = Array.Empty<string>();
+        TheirQueueAt = DateTime.MinValue;
+        QueueRequested = false;
         Ping = null;
         LastResult = "";
         State = LinkState.Connecting;
@@ -62,7 +65,8 @@ public sealed class JukeboxClient
     public void Tick()
     {
         if (State == LinkState.Connecting && (DateTime.Now - sentAt).TotalSeconds > 10) State = LinkState.Failed;
-        if (State == LinkState.Linked && (DateTime.Now - InfoAt).TotalSeconds > 45 && (DateTime.Now - sentAt).TotalSeconds > 45) Hello();
+        // Their Tundy sends new info by itself when its song changes; this is only a fallback.
+        if (State == LinkState.Linked && (DateTime.Now - InfoAt).TotalSeconds > 30 && (DateTime.Now - sentAt).TotalSeconds > 30) Hello();
         if (waitingForAck && (DateTime.Now - sentAt).TotalSeconds > 20)
         {
             waitingForAck = false;
@@ -98,14 +102,45 @@ public sealed class JukeboxClient
         LastResultOk = true;
     }
 
-    /// <summary>Asks for the songs in their queue (to save them as a playlist).</summary>
-    public void RequestQueue()
+    /// <summary>Sends one song to their queue (no playlist needed).</summary>
+    public void SendOne(JukeboxSong song) => Send(new[] { song }, shuffle: false);
+
+    /// <summary>The songs waiting in their queue, in play order, as of <see cref="TheirQueueAt"/> (ids, see JukeboxProtocol).</summary>
+    public IReadOnlyList<string> TheirQueue { get; private set; } = Array.Empty<string>();
+    public DateTime TheirQueueAt { get; private set; } = DateTime.MinValue;
+    public bool QueueRequested { get; private set; }
+    private DateTime queueAskedAt = DateTime.MinValue;
+    private bool saveWhenReceived;
+
+    /// <summary>Asks for the songs in their queue: to show them, or (with save) to make a playlist of them.</summary>
+    public void RequestQueue(bool save = false)
     {
         if (State != LinkState.Linked) return;
+        if (save && TheirQueueAt > DateTime.Now.AddSeconds(-20))
+        {
+            // Fresh enough already: save it right away.
+            SaveReceived(TheirQueue.ToList());
+            return;
+        }
+        if (QueueRequested && (DateTime.Now - queueAskedAt).TotalSeconds < 10) { saveWhenReceived |= save; return; }
         qlistParts = null;
+        saveWhenReceived |= save;
+        QueueRequested = true;
+        queueAskedAt = DateTime.Now;
         plugin.Replier.SendRawTo(Who, JukeboxProtocol.Prefix + "getq");
-        LastResult = $"Asking {TargetName} for their queue...";
-        LastResultOk = true;
+        if (save)
+        {
+            LastResult = $"Asking {TargetName} for their queue...";
+            LastResultOk = true;
+        }
+    }
+
+    private void SaveReceived(List<string> ids)
+    {
+        saveWhenReceived = false;
+        LastResult = ids.Count == 0 ? $"{TargetName}'s queue is empty." : $"Saved {ids.Count} songs from {TargetName}'s queue.";
+        LastResultOk = ids.Count > 0;
+        if (ids.Count > 0) QueueReceived?.Invoke(TargetName!, ids);
     }
 
     /// <summary>An answer from a linked Tundy (only the player the terminal is linked to counts).</summary>
@@ -118,6 +153,8 @@ public sealed class JukeboxClient
         {
             case "info" when JukeboxProtocol.ParseInfo(rest) is { } info:
                 if (State == LinkState.Connecting) Ping = DateTime.Now - sentAt;
+                // A different song or queue length: their queue list is out of date.
+                if (Info != null && (Info.NowPlaying != info.NowPlaying || Info.Queued != info.Queued)) TheirQueueAt = DateTime.MinValue;
                 Info = info;
                 InfoAt = DateTime.Now;
                 State = LinkState.Linked;
@@ -136,7 +173,8 @@ public sealed class JukeboxClient
                     "waiting" => ($"Sent {detail}: waiting for {TargetName} to approve them.", true),
                     _ => ($"Not sent: {detail}.", false),
                 };
-                Hello(); // their queue changed
+                TheirQueueAt = DateTime.MinValue; // their queue changed
+                Hello();
                 break;
             case "qlist":
                 var p = rest.Split(' ', 2);
@@ -146,9 +184,10 @@ public sealed class JukeboxClient
                 if (qlistParts.Any(x => x == null)) return;
                 var ids = JukeboxProtocol.ParseIds(string.Join(',', qlistParts));
                 qlistParts = null;
-                LastResult = ids.Count == 0 ? $"{TargetName}'s queue is empty." : $"Saved {ids.Count} songs from {TargetName}'s queue.";
-                LastResultOk = ids.Count > 0;
-                if (ids.Count > 0) QueueReceived?.Invoke(TargetName, ids);
+                TheirQueue = ids;
+                TheirQueueAt = DateTime.Now;
+                QueueRequested = false;
+                if (saveWhenReceived) SaveReceived(ids);
                 break;
         }
     }

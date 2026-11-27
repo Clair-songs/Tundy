@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -13,8 +14,8 @@ using Dalamud.Interface.Windowing;
 namespace Tundy;
 
 /// <summary>
-/// The jukebox terminal: link to another player's Tundy, make and edit playlists (saved on your PC) and send them
-/// to their queue. Drawn as a terminal in the look picked in Settings → Look (pastel, minimal or Dalamud's).
+/// The jukebox terminal: link to another player's Tundy, make and edit playlists (saved on your PC), send them or
+/// single songs to their queue, and see their queue. Drawn as a terminal in the look picked in Settings → Look.
 /// </summary>
 public sealed class JukeboxWindow : Window
 {
@@ -23,22 +24,28 @@ public sealed class JukeboxWindow : Window
     private string addInput = string.Empty;
     private string renameInput = string.Empty;
     private int renaming = -1;
+    private int deleting = -1;
     private string searchStatus = string.Empty;
     private IReadOnlyList<YouTubeResult> searchResults = Array.Empty<YouTubeResult>();
     private bool searching;
     private readonly SemaphoreSlim lookups = new(2);
 
+    // Names and lengths of songs in their queue (looked up here: the link only carries ids).
+    private readonly ConcurrentDictionary<string, JukeboxSong> known = new();
+
     public JukeboxWindow(Plugin plugin) : base("Tundy jukebox terminal###TundyJukebox")
     {
         this.plugin = plugin;
-        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 420), MaximumSize = new Vector2(1600, 1400) };
-        Size = new Vector2(720, 560);
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(600, 440), MaximumSize = new Vector2(1600, 1400) };
+        Size = new Vector2(760, 580);
         SizeCondition = ImGuiCond.FirstUseEver;
         plugin.Jukebox.QueueReceived += SaveTheirQueue;
     }
 
     private Configuration Cfg => plugin.Config;
     private JukeboxClient Link => plugin.Jukebox;
+    private bool Linked => Link.State == JukeboxClient.LinkState.Linked;
+    private bool CanSend => Linked && Link.Info is { Accepting: true };
 
     /// <summary>Opens the terminal and links it to this player.</summary>
     public void OpenFor(string name, string? world)
@@ -54,44 +61,32 @@ public sealed class JukeboxWindow : Window
     public override void OnClose()
     {
         searchResults = Array.Empty<YouTubeResult>();
+        searchStatus = string.Empty;
     }
 
     public override void Draw()
     {
         Link.Tick();
         DrawScanlines();
-
-        // Header
-        Mono(() => ImGui.TextColored(Theme.Accent, "TUNDY//JUKEBOX_TERMINAL"));
-        var (state, color) = Link.State switch
-        {
-            JukeboxClient.LinkState.Linked => ("LINK ESTABLISHED", Theme.Good),
-            JukeboxClient.LinkState.Connecting => ("LINKING...", Theme.Warn),
-            JukeboxClient.LinkState.Off => ("THEIR JUKEBOX IS OFF", Theme.Warn),
-            JukeboxClient.LinkState.Failed => ("LINK FAILED", Theme.Bad),
-            _ => ("NO TARGET", Theme.Muted),
-        };
-        var extra = Link.State == JukeboxClient.LinkState.Linked && Link.Info != null
-            ? $" · v{Link.Info.Version}" + (Link.Ping is { } ping ? $" · {ping.TotalSeconds:0.0} s" : "")
-            : "";
-        var status = "■ " + state + extra;
-        ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - ImGui.CalcTextSize(status).X);
-        Mono(() => ImGui.TextColored(color, status));
-
+        DrawHeader();
         DrawTarget();
         ImGui.Spacing();
 
-        // Playlists | songs
-        var height = ImGui.GetContentRegionAvail().Y - ImGui.GetFrameHeightWithSpacing() * 2 - ImGui.GetTextLineHeightWithSpacing() - 8;
-        ImGui.BeginChild("lists", new Vector2(190 * ImGuiHelpers.GlobalScale, height), true);
-        DrawPlaylists();
-        ImGui.EndChild();
-        ImGui.SameLine();
-        ImGui.BeginChild("songs", new Vector2(0, height), true);
-        DrawSongs();
-        ImGui.EndChild();
-
-        DrawSendBar();
+        if (ImGui.BeginTabBar("jukeboxTabs"))
+        {
+            if (ImGui.BeginTabItem("Playlists"))
+            {
+                DrawPlaylistsTab();
+                ImGui.EndTabItem();
+            }
+            var queueLabel = Link.Info is { } i ? $"Their queue ({i.Queued})###theirQueue" : "Their queue###theirQueue";
+            if (ImGui.BeginTabItem(queueLabel))
+            {
+                DrawTheirQueueTab();
+                ImGui.EndTabItem();
+            }
+            ImGui.EndTabBar();
+        }
     }
 
     // ---- look
@@ -99,6 +94,11 @@ public sealed class JukeboxWindow : Window
     private void Mono(Action draw)
     {
         using (plugin.MonoFont.Push()) draw();
+    }
+
+    private float MonoWidth(string text)
+    {
+        using (plugin.MonoFont.Push()) return ImGui.CalcTextSize(text).X;
     }
 
     /// <summary>Faint horizontal lines behind everything, for the terminal look.</summary>
@@ -113,7 +113,37 @@ public sealed class JukeboxWindow : Window
 
     private static void Label(string text) => ImGui.TextColored(Theme.Heading, text);
 
-    // ---- target
+    private static void Muted(string text)
+    {
+        ImGui.PushTextWrapPos(0);
+        ImGui.TextColored(Theme.Muted, text);
+        ImGui.PopTextWrapPos();
+    }
+
+    // ---- header and target
+
+    private void DrawHeader()
+    {
+        const string title = "TUNDY//JUKEBOX_TERMINAL";
+        Mono(() => ImGui.TextColored(Theme.Accent, title));
+        var (state, color) = Link.State switch
+        {
+            JukeboxClient.LinkState.Linked => ("LINK ESTABLISHED", Theme.Good),
+            JukeboxClient.LinkState.Connecting => ("LINKING...", Theme.Warn),
+            JukeboxClient.LinkState.Off => ("THEIR JUKEBOX IS OFF", Theme.Warn),
+            JukeboxClient.LinkState.Failed => ("LINK FAILED", Theme.Bad),
+            _ => ("NO TARGET", Theme.Muted),
+        };
+        var extra = Linked && Link.Info != null ? $" · v{Link.Info.Version}" + (Link.Ping is { } ping ? $" · {ping.TotalSeconds:0.0} s" : "") : "";
+        var status = state + extra;
+
+        // Measured in the same (monospace) font it's drawn in, so it isn't cut off at the right edge.
+        var width = MonoWidth(status);
+        var right = ImGui.GetWindowContentRegionMax().X;
+        if (ImGui.GetCursorPosX() + MonoWidth(title) + width + 20 * ImGuiHelpers.GlobalScale < right)
+            ImGui.SameLine(right - width);
+        Mono(() => ImGui.TextColored(color, status));
+    }
 
     private void DrawTarget()
     {
@@ -121,8 +151,8 @@ public sealed class JukeboxWindow : Window
         if (Link.TargetName == null)
         {
             Label("TARGET");
-            ImGui.TextColored(Theme.Muted, "No player linked. Right-click a player and pick \"Tundy: open jukebox terminal\", "
-                                           + "or target them and type /tundy jukebox. Your playlists below work either way.");
+            Muted("No player linked. Right-click a player and pick \"Tundy: open jukebox terminal\", or target them and type "
+                  + "/tundy jukebox. Your playlists below work either way.");
             Ui.EndCard();
             return;
         }
@@ -137,7 +167,7 @@ public sealed class JukeboxWindow : Window
                 ImGui.SameLine();
                 ImGui.TextColored(Theme.Muted, "@ " + Link.TargetWorld.ToUpperInvariant());
             }
-            ImGui.TextColored(Theme.Muted, Link.State switch
+            Muted(Link.State switch
             {
                 JukeboxClient.LinkState.Connecting => "Asking their Tundy...",
                 JukeboxClient.LinkState.Failed => "No answer. They need Tundy with the jukebox turned on (and to be able to get your tells).",
@@ -146,7 +176,7 @@ public sealed class JukeboxWindow : Window
                 {
                     i.Accepting ? null : "not taking songs right now",
                     i.NeedsApproval ? "they approve each send" : "songs go straight in",
-                    i.CooldownSeconds > 0 ? $"you can send more in {Math.Ceiling(i.CooldownSeconds / 60.0)} min" : null,
+                    i.CooldownSeconds > 0 ? $"more playlists in {Math.Ceiling(i.CooldownSeconds / 60.0)} min" : null,
                     $"up to {i.MaxSongs} songs per send",
                 }.Where(s => s != null)),
                 _ => "",
@@ -156,12 +186,15 @@ public sealed class JukeboxWindow : Window
             Label("NOW_PLAYING");
             if (Link.Info is { } info)
             {
+                ImGui.PushTextWrapPos(0);
                 ImGui.TextUnformatted(info.NowPlaying ?? "nothing");
-                ImGui.TextColored(Theme.Muted, $"queue: {info.Queued} song{(info.Queued == 1 ? "" : "s")}"
-                                               + (info.QueuedSeconds > 0 ? $" · {Ui.About(info.QueuedSeconds)}" : ""));
+                ImGui.PopTextWrapPos();
+                Muted($"queue: {info.Queued} song{(info.Queued == 1 ? "" : "s")}"
+                      + (info.QueuedSeconds > 0 ? $" · {Ui.About(info.QueuedSeconds)}" : "")
+                      + $" · updated {Ui.Ago(Link.InfoAt)}");
             }
             else ImGui.TextColored(Theme.Muted, "-");
-            if (ImGui.SmallButton("Refresh")) Link.Refresh();
+            if (ImGui.SmallButton("Refresh")) { Link.Refresh(); if (Linked) Link.RequestQueue(); }
             ImGui.SameLine();
             if (ImGui.SmallButton("Disconnect")) Link.Disconnect();
             ImGui.EndTable();
@@ -169,11 +202,24 @@ public sealed class JukeboxWindow : Window
         Ui.EndCard();
     }
 
-    // ---- playlists
+    // ---- playlists tab
 
     private List<JukeboxPlaylist> Playlists => Cfg.JukeboxPlaylists;
 
     private JukeboxPlaylist? Current => selected >= 0 && selected < Playlists.Count ? Playlists[selected] : null;
+
+    private void DrawPlaylistsTab()
+    {
+        var height = ImGui.GetContentRegionAvail().Y - ImGui.GetFrameHeightWithSpacing() - ImGui.GetTextLineHeightWithSpacing() * 2 - 8;
+        ImGui.BeginChild("lists", new Vector2(200 * ImGuiHelpers.GlobalScale, height), true);
+        DrawPlaylists();
+        ImGui.EndChild();
+        ImGui.SameLine();
+        ImGui.BeginChild("songs", new Vector2(0, height), true);
+        DrawSongs();
+        ImGui.EndChild();
+        DrawSendBar();
+    }
 
     private void DrawPlaylists()
     {
@@ -185,45 +231,29 @@ public sealed class JukeboxWindow : Window
             if (renaming == i)
             {
                 ImGui.SetNextItemWidth(-1);
+                if (ImGui.IsWindowAppearing() || !ImGui.IsAnyItemActive()) ImGui.SetKeyboardFocusHere();
                 if (ImGui.InputText("##rename", ref renameInput, 40, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll))
                 {
                     if (renameInput.Trim().Length > 0) p.Name = renameInput.Trim();
                     renaming = -1;
                     plugin.SaveConfig();
                 }
-                if (!ImGui.IsItemActive() && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !ImGui.IsItemHovered()) renaming = -1;
+                if (ImGui.IsItemDeactivated()) renaming = -1;
             }
             else
             {
+                var count = p.Songs.Count.ToString();
                 if (ImGui.Selectable($"{p.Name}##pl", selected == i)) selected = i;
                 if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) { renaming = i; renameInput = p.Name; }
-                ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(p.Songs.Count.ToString()).X);
-                ImGui.TextColored(Theme.Muted, p.Songs.Count.ToString());
-                if (ImGui.BeginPopupContextItem("plmenu"))
-                {
-                    if (ImGui.MenuItem("Rename")) { renaming = i; renameInput = p.Name; }
-                    if (ImGui.MenuItem("Duplicate"))
-                    {
-                        Playlists.Insert(i + 1, new JukeboxPlaylist { Name = p.Name + " (copy)", Songs = p.Songs.Select(s => new JukeboxSong { Url = s.Url, Title = s.Title, Seconds = s.Seconds }).ToList() });
-                        plugin.SaveConfig();
-                    }
-                    if (ImGui.MenuItem("Delete (hold Ctrl)") && ImGui.GetIO().KeyCtrl)
-                    {
-                        Playlists.RemoveAt(i);
-                        selected = Math.Min(selected, Playlists.Count - 1);
-                        plugin.SaveConfig();
-                        ImGui.EndPopup();
-                        ImGui.PopID();
-                        break;
-                    }
-                    ImGui.EndPopup();
-                }
+                ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.CalcTextSize(count).X);
+                ImGui.TextColored(Theme.Muted, count);
             }
             ImGui.PopID();
         }
 
+        // New / rename / duplicate / delete, as buttons
         ImGui.Spacing();
-        if (ImGui.Selectable("+ New playlist"))
+        if (Ui.IconButton("new", FontAwesomeIcon.Plus, "New playlist"))
         {
             Playlists.Add(new JukeboxPlaylist { Name = $"Playlist {Playlists.Count + 1}" });
             selected = Playlists.Count - 1;
@@ -231,35 +261,94 @@ public sealed class JukeboxWindow : Window
             renameInput = Playlists[selected].Name;
             plugin.SaveConfig();
         }
-        ImGui.Spacing();
-        ImGui.TextColored(Theme.Muted, "Saved on your PC. Double-click to rename, right-click for more.");
-    }
+        var p0 = Current;
+        ImGui.SameLine();
+        if (Ui.IconButton("rename", FontAwesomeIcon.Pen, "Rename the selected playlist (or double-click it)", p0 == null))
+        {
+            renaming = selected;
+            renameInput = p0!.Name;
+        }
+        ImGui.SameLine();
+        if (Ui.IconButton("dup", FontAwesomeIcon.Copy, "Duplicate the selected playlist", p0 == null))
+        {
+            Playlists.Insert(selected + 1, new JukeboxPlaylist
+            {
+                Name = p0!.Name + " (copy)",
+                Songs = p0.Songs.Select(s => new JukeboxSong { Url = s.Url, Title = s.Title, Seconds = s.Seconds }).ToList(),
+            });
+            selected++;
+            plugin.SaveConfig();
+        }
+        ImGui.SameLine();
+        if (Ui.IconButton("del", FontAwesomeIcon.Trash, "Delete the selected playlist", p0 == null))
+        {
+            deleting = selected;
+            ImGui.OpenPopup("confirmDelete");
+        }
+        if (ImGui.BeginPopup("confirmDelete"))
+        {
+            if (deleting >= 0 && deleting < Playlists.Count)
+            {
+                ImGui.TextUnformatted($"Delete \"{Playlists[deleting].Name}\" ({Playlists[deleting].Songs.Count} songs)?");
+                ImGui.TextColored(Theme.Muted, "This can't be undone.");
+                if (ImGui.Button("Delete"))
+                {
+                    Playlists.RemoveAt(deleting);
+                    selected = Math.Clamp(selected, 0, Math.Max(0, Playlists.Count - 1));
+                    deleting = -1;
+                    plugin.SaveConfig();
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Keep it")) { deleting = -1; ImGui.CloseCurrentPopup(); }
+            }
+            ImGui.EndPopup();
+        }
 
-    // ---- songs
+        ImGui.Spacing();
+        Muted("Saved on your PC. Double-click a playlist to rename it.");
+    }
 
     private void DrawSongs()
     {
-        if (Current is not { } p)
+        // Add or send: a link, or a YouTube search (works with or without a playlist)
+        var p = Current;
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 150 * ImGuiHelpers.GlobalScale);
+        var enter = ImGui.InputTextWithHint("##add", "> paste a YouTube or Spotify link, or search YouTube", ref addInput, 300, ImGuiInputTextFlags.EnterReturnsTrue);
+        var link = LooksLikeLink(addInput);
+        ImGui.SameLine();
+        if (link)
+        {
+            if (p == null) ImGui.BeginDisabled();
+            var add = ImGui.Button("+ Add") || (enter && p != null);
+            if (p == null) ImGui.EndDisabled();
+            Ui.Tooltip(p == null ? "Make a playlist first, or send it straight away." : "Add it to this playlist.");
+            if (add && p != null) { AddSong(p, addInput.Trim(), null, null); addInput = string.Empty; }
+            ImGui.SameLine();
+            if (!CanSend) ImGui.BeginDisabled();
+            if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, "Send")) { SendSingle(addInput.Trim(), null, null); addInput = string.Empty; }
+            if (!CanSend) ImGui.EndDisabled();
+            SendTooltip("Send just this song to their queue.");
+        }
+        else
+        {
+            if (ImGui.Button("Search") || enter) Search();
+        }
+        if (searchStatus.Length > 0) Muted(searchStatus);
+        if (searchResults.Count > 0) DrawSearchResults(p);
+
+        ImGui.Separator();
+        if (p is null)
         {
             Label("NO_PLAYLIST");
-            ImGui.TextColored(Theme.Muted, "Make a playlist on the left, then add songs here.");
+            Muted("Make a playlist on the left to save songs. You can also send a song straight away from the box above.");
             return;
         }
 
         var total = p.Songs.Sum(s => s.Seconds ?? 0);
         Label($"{p.Name.ToUpperInvariant()} // {p.Songs.Count} TRACK{(p.Songs.Count == 1 ? "" : "S")}" + (total > 0 ? $" · {Ui.Length(total)}" : ""));
-
-        // Add: a link, or a YouTube search
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 70 * ImGuiHelpers.GlobalScale);
-        var go = ImGui.InputTextWithHint("##add", "> paste a YouTube or Spotify link, or search YouTube", ref addInput, 300, ImGuiInputTextFlags.EnterReturnsTrue);
-        ImGui.SameLine();
-        go |= ImGui.Button(LooksLikeLink(addInput) ? "+ Add" : "Search");
-        if (go && addInput.Trim().Length > 0) AddOrSearch(p);
-        if (searchStatus.Length > 0) ImGui.TextColored(Theme.Muted, searchStatus);
-        if (searchResults.Count > 0) DrawSearchResults(p);
-
-        ImGui.Separator();
         var rowH = ImGui.GetFrameHeight();
+        var buttons = (rowH + ImGui.GetStyle().ItemSpacing.X) * 4;
         for (var i = 0; i < p.Songs.Count; i++)
         {
             var s = p.Songs[i];
@@ -267,12 +356,14 @@ public sealed class JukeboxWindow : Window
             ImGui.AlignTextToFramePadding();
             ImGui.TextColored(Theme.Muted, $"{i + 1:00}");
             ImGui.SameLine();
-            var right = (rowH + ImGui.GetStyle().ItemSpacing.X) * 3 + 50 * ImGuiHelpers.GlobalScale;
+            var right = buttons + 50 * ImGuiHelpers.GlobalScale;
             ImGui.TextUnformatted(Ui.Ellipsize(s.Title ?? s.Url, ImGui.GetContentRegionAvail().X - right));
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(s.Url);
             ImGui.SameLine(ImGui.GetContentRegionMax().X - right + 6 * ImGuiHelpers.GlobalScale);
             ImGui.TextColored(Theme.Muted, Ui.Length(s.Seconds));
-            ImGui.SameLine(ImGui.GetContentRegionMax().X - (rowH + ImGui.GetStyle().ItemSpacing.X) * 3);
+            ImGui.SameLine(ImGui.GetContentRegionMax().X - buttons);
+            if (Ui.IconButton("send", FontAwesomeIcon.Play, CanSend ? "Send just this song to their queue" : SendBlockedReason(), !CanSend)) Link.SendOne(s);
+            ImGui.SameLine();
             if (Ui.IconButton("up", FontAwesomeIcon.ArrowUp, "Move up", i == 0)) { (p.Songs[i - 1], p.Songs[i]) = (p.Songs[i], p.Songs[i - 1]); plugin.SaveConfig(); }
             ImGui.SameLine();
             if (Ui.IconButton("down", FontAwesomeIcon.ArrowDown, "Move down", i == p.Songs.Count - 1)) { (p.Songs[i + 1], p.Songs[i]) = (p.Songs[i], p.Songs[i + 1]); plugin.SaveConfig(); }
@@ -286,7 +377,17 @@ public sealed class JukeboxWindow : Window
             }
             ImGui.PopID();
         }
-        if (p.Songs.Count == 0) ImGui.TextColored(Theme.Muted, "No songs yet: paste a link above, or type a few words to search YouTube.");
+        if (p.Songs.Count == 0) Muted("No songs yet: paste a link above, or type a few words to search YouTube.");
+    }
+
+    private string SendBlockedReason() =>
+        Link.TargetName == null ? "Open the terminal on a player who runs Tundy to send songs."
+        : !Linked ? "Not linked to their Tundy."
+        : "They aren't taking songs right now.";
+
+    private void SendTooltip(string ok)
+    {
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(CanSend ? ok : SendBlockedReason());
     }
 
     private static bool LooksLikeLink(string s)
@@ -295,18 +396,10 @@ public sealed class JukeboxWindow : Window
         return Plugin.YouTubeRegex().IsMatch(s) || Plugin.SpotifyRegex().IsMatch(s);
     }
 
-    private void AddOrSearch(JukeboxPlaylist p)
+    private void Search()
     {
         var text = addInput.Trim();
-        if (LooksLikeLink(text))
-        {
-            AddSong(p, text, null, null);
-            addInput = string.Empty;
-            searchResults = Array.Empty<YouTubeResult>();
-            searchStatus = string.Empty;
-            return;
-        }
-        if (searching) return;
+        if (text.Length == 0 || searching) return;
         searching = true;
         searchStatus = $"Searching YouTube for \"{text}\"...";
         _ = Task.Run(async () =>
@@ -314,29 +407,31 @@ public sealed class JukeboxWindow : Window
             try
             {
                 searchResults = await plugin.YtDlp.SearchAsync(text, 6, default);
-                searchStatus = searchResults.Count == 0 ? "Nothing found." : "Pick a result to add it:";
+                searchStatus = searchResults.Count == 0 ? "Nothing found." : "Add a result to the playlist (+), or send it straight away (play button):";
             }
-            catch (Exception ex)
-            {
-                searchStatus = $"Search failed: {RetryPolicy.Short(ex.Message)}";
-            }
+            catch (Exception ex) { searchStatus = $"Search failed: {RetryPolicy.Short(ex.Message)}"; }
             finally { searching = false; }
         });
     }
 
-    private void DrawSearchResults(JukeboxPlaylist p)
+    private void DrawSearchResults(JukeboxPlaylist? p)
     {
         foreach (var r in searchResults.ToList())
         {
             ImGui.PushID(r.Id);
-            if (Ui.IconButton("add", FontAwesomeIcon.Plus, "Add to this playlist"))
+            var url = $"https://www.youtube.com/watch?v={r.Id}";
+            var title = TitleCleaner.Clean(r.Title);
+            if (Ui.IconButton("add", FontAwesomeIcon.Plus, p == null ? "Make a playlist first" : "Add to this playlist", p == null))
             {
-                AddSong(p, $"https://www.youtube.com/watch?v={r.Id}", TitleCleaner.Clean(r.Title), r.Seconds);
+                AddSong(p!, url, title, r.Seconds);
                 searchResults = searchResults.Where(x => x.Id != r.Id).ToList();
             }
             ImGui.SameLine();
+            if (Ui.IconButton("send", FontAwesomeIcon.Play, CanSend ? "Send just this song to their queue" : SendBlockedReason(), !CanSend))
+                SendSingle(url, title, r.Seconds);
+            ImGui.SameLine();
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(Ui.Ellipsize(TitleCleaner.Clean(r.Title), ImGui.GetContentRegionAvail().X - 60 * ImGuiHelpers.GlobalScale));
+            ImGui.TextUnformatted(Ui.Ellipsize(title, ImGui.GetContentRegionAvail().X - 60 * ImGuiHelpers.GlobalScale));
             ImGui.SameLine();
             ImGui.TextColored(Theme.Muted, Ui.Length(r.Seconds));
             ImGui.PopID();
@@ -344,17 +439,20 @@ public sealed class JukeboxWindow : Window
         if (ImGui.SmallButton("Close results")) { searchResults = Array.Empty<YouTubeResult>(); searchStatus = string.Empty; }
     }
 
+    private void SendSingle(string url, string? title, int? seconds) =>
+        Link.SendOne(new JukeboxSong { Url = url, Title = title, Seconds = seconds });
+
     private void AddSong(JukeboxPlaylist p, string url, string? title, int? seconds)
     {
         if (p.Songs.Any(s => JukeboxProtocol.IdFor(s.Url) == JukeboxProtocol.IdFor(url))) { searchStatus = "That song is already in this playlist."; return; }
         var song = new JukeboxSong { Url = url, Title = title, Seconds = seconds };
         p.Songs.Add(song);
         plugin.SaveConfig();
-        if (title == null || seconds == null) LookUp(song);
+        if (title == null || seconds == null) LookUp(song, save: true);
     }
 
     /// <summary>Finds a song's name and length in the background (at most two at once).</summary>
-    private void LookUp(JukeboxSong song)
+    private void LookUp(JukeboxSong song, bool save)
     {
         _ = Task.Run(async () =>
         {
@@ -373,53 +471,114 @@ public sealed class JukeboxWindow : Window
                     song.Title ??= info.DisplayTitle;
                     song.Seconds ??= info.Seconds;
                 }
-                plugin.SaveConfig();
+                if (save) plugin.SaveConfig();
             }
             catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't look up {song.Url}"); }
             finally { lookups.Release(); }
         });
     }
 
-    /// <summary>"Save their queue": their queue's songs become a new playlist.</summary>
-    private void SaveTheirQueue(string name, List<string> ids)
-    {
-        var p = new JukeboxPlaylist { Name = $"{name}'s queue {DateTime.Now:MMM d}" };
-        foreach (var id in ids)
-            if (JukeboxProtocol.FromId(id) is { } s) p.Songs.Add(new JukeboxSong { Url = s.Url });
-        Cfg.JukeboxPlaylists.Add(p);
-        selected = Cfg.JukeboxPlaylists.Count - 1;
-        plugin.SaveConfig();
-        foreach (var song in p.Songs) LookUp(song);
-    }
-
-    // ---- send
-
     private void DrawSendBar()
     {
-        var linked = Link.State == JukeboxClient.LinkState.Linked && Link.Info is { Accepting: true };
         var p = Current;
-        var canSend = linked && p is { Songs.Count: > 0 };
-
+        var canSend = CanSend && p is { Songs.Count: > 0 };
         if (!canSend) ImGui.BeginDisabled();
         ImGui.PushStyleColor(ImGuiCol.Button, Theme.PrimaryButton);
-        var target = Link.TargetName ?? "their";
-        if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, $"Send to {target}'s queue")) Link.Send(p!.Songs, shuffle: false);
+        if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Play, $"Send the playlist to {Link.TargetName ?? "their"}'s queue")) Link.Send(p!.Songs, shuffle: false);
         ImGui.PopStyleColor();
         ImGui.SameLine();
         if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Random, "Shuffle & send")) Link.Send(p!.Songs, shuffle: true);
         if (!canSend) ImGui.EndDisabled();
         if (!canSend && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(!linked ? "Link to a player with Tundy first (and they need to be taking songs)." : "Add songs to the playlist first.");
+            ImGui.SetTooltip(!CanSend ? SendBlockedReason() : "Add songs to the playlist first.");
+        DrawResult();
+    }
 
+    private void DrawResult()
+    {
+        if (Link.LastResult.Length > 0)
+        {
+            ImGui.PushTextWrapPos(0);
+            ImGui.TextColored(Link.LastResultOk ? Theme.Muted : Theme.Bad, "> " + Link.LastResult);
+            ImGui.PopTextWrapPos();
+        }
+        else Muted("> Songs go in one hidden tell (or a few, for big playlists). Their rules apply: approval, limits, cooldowns.");
+    }
+
+    // ---- their queue tab
+
+    private void DrawTheirQueueTab()
+    {
+        if (!Linked)
+        {
+            Muted(Link.TargetName == null
+                ? "Open the terminal on a player who runs Tundy to see their queue."
+                : "Not linked to their Tundy yet.");
+            return;
+        }
+
+        // Ask for it when the tab is open and it's out of date (their info says it changed, or after 30 s).
+        if (!Link.QueueRequested && (DateTime.Now - Link.TheirQueueAt).TotalSeconds > 30) Link.RequestQueue();
+
+        Label("NOW_PLAYING");
+        ImGui.TextUnformatted(Link.Info?.NowPlaying ?? "nothing");
+        ImGui.Spacing();
+
+        var ids = Link.TheirQueue;
+        Label($"UP_NEXT // {ids.Count} SONG{(ids.Count == 1 ? "" : "S")}");
         ImGui.SameLine();
-        if (!linked) ImGui.BeginDisabled();
-        if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Download, "Save their queue")) Link.RequestQueue();
-        if (!linked) ImGui.EndDisabled();
+        if (ImGui.SmallButton("Refresh")) Link.RequestQueue();
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Save as a playlist")) Link.RequestQueue(save: true);
         Ui.Tooltip("Copies the songs in their queue into a new playlist of yours.");
 
-        ImGui.PushTextWrapPos();
-        if (Link.LastResult.Length > 0) ImGui.TextColored(Link.LastResultOk ? Theme.Muted : Theme.Bad, "> " + Link.LastResult);
-        else ImGui.TextColored(Theme.Muted, "> Songs go in one hidden tell (or a few, for big playlists). Their rules apply: approval, limits, cooldowns.");
-        ImGui.PopTextWrapPos();
+        var height = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing() * 2 - 8;
+        ImGui.BeginChild("theirQueueList", new Vector2(0, height), true);
+        if (Link.TheirQueueAt == DateTime.MinValue && Link.QueueRequested) Muted("Asking their Tundy for its queue...");
+        else if (ids.Count == 0) Muted("Their queue is empty.");
+        var p = Current;
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var id = ids[i];
+            if (JukeboxProtocol.FromId(id) is not { } s) continue;
+            var song = known.GetOrAdd(id, _ =>
+            {
+                var fresh = new JukeboxSong { Url = s.Url };
+                LookUp(fresh, save: false);
+                return fresh;
+            });
+            ImGui.PushID(id);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextColored(Theme.Muted, $"{i + 1:00}");
+            ImGui.SameLine();
+            var right = ImGui.GetFrameHeight() + 60 * ImGuiHelpers.GlobalScale;
+            ImGui.TextUnformatted(Ui.Ellipsize(song.Title ?? "(looking it up...)", ImGui.GetContentRegionAvail().X - right));
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(song.Url);
+            ImGui.SameLine(ImGui.GetContentRegionMax().X - right + 6 * ImGuiHelpers.GlobalScale);
+            ImGui.TextColored(Theme.Muted, Ui.Length(song.Seconds));
+            ImGui.SameLine(ImGui.GetContentRegionMax().X - ImGui.GetFrameHeight());
+            if (Ui.IconButton("keep", FontAwesomeIcon.Plus, p == null ? "Make a playlist first" : $"Add to \"{p.Name}\"", p == null))
+                AddSong(p!, song.Url, song.Title, song.Seconds);
+            ImGui.PopID();
+        }
+        ImGui.EndChild();
+        if (Link.TheirQueueAt > DateTime.MinValue) Muted($"> updated {Ui.Ago(Link.TheirQueueAt)}");
+        DrawResult();
+    }
+
+    /// <summary>"Save as a playlist": their queue's songs become a new playlist.</summary>
+    private void SaveTheirQueue(string name, List<string> ids)
+    {
+        var p = new JukeboxPlaylist { Name = $"{name}'s queue {DateTime.Now:MMM d}" };
+        foreach (var id in ids)
+        {
+            if (JukeboxProtocol.FromId(id) is not { } s) continue;
+            known.TryGetValue(id, out var k);
+            p.Songs.Add(new JukeboxSong { Url = s.Url, Title = k?.Title, Seconds = k?.Seconds });
+        }
+        Cfg.JukeboxPlaylists.Add(p);
+        selected = Cfg.JukeboxPlaylists.Count - 1;
+        plugin.SaveConfig();
+        foreach (var song in p.Songs.Where(x => x.Title == null || x.Seconds == null)) LookUp(song, save: true);
     }
 }

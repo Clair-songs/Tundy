@@ -33,11 +33,13 @@ public sealed partial class Plugin
     /// A tell that belongs to the jukebox link: hidden from chat (yours and, since they run Tundy too, theirs) and
     /// handled here. Returns true when it was one, so the normal request handling skips it.
     /// </summary>
-    private bool HandleJukeboxTell(IHandleableChatMessage message)
+    /// <param name="process">False: only hide it (it was already handled in <see cref="OnCheckMessageHandled"/>).</param>
+    private bool HandleJukeboxTell(IHandleableChatMessage message, bool process = true)
     {
         var text = message.Message.TextValue;
         if (!JukeboxProtocol.IsProtocol(text)) return false;
         message.PreventOriginal();
+        if (!process) return true;
         if (message.LogKind != XivChatType.TellIncoming) return true; // our own outgoing link tells: just hide them
 
         var encoded = message.Sender.Encode();
@@ -66,19 +68,50 @@ public sealed partial class Plugin
         {
             case "hi":
                 Replier.SendRawTo(who, Config.AllowJukebox ? JukeboxProtocol.Info(InfoFor(from.Name, from.World)) : JukeboxProtocol.Prefix + "off");
+                if (Config.AllowJukebox) jukeboxListeners[who] = (from.Name, from.World, now);
                 break;
             case "q":
                 ReceiveJukeboxSongs(encoded, from.Name, who, rest);
                 break;
             case "getq" when Config.AllowJukebox:
-                var ids = new List<string>();
-                if ((Player.Current?.Request ?? Player.Syncing?.Request) is { } playing && JukeboxProtocol.IdFor(playing.Url) is { } pid) ids.Add(pid);
-                ids.AddRange(Player.FullQueue().Select(q => JukeboxProtocol.IdFor(q.Request.Url)).OfType<string>());
-                foreach (var m in JukeboxProtocol.Chunk("qlist", ids.Distinct().Take(120).ToList())) Replier.SendRawTo(who, m);
-                AddLog(from.Name, "jukebox", "Sent them your queue's songs", true);
+                // The songs waiting, in play order (the one playing now is in "info").
+                var ids = Player.FullQueue().Select(q => JukeboxProtocol.IdFor(q.Request.Url)).OfType<string>().Distinct().Take(120).ToList();
+                foreach (var m in JukeboxProtocol.Chunk("qlist", ids)) Replier.SendRawTo(who, m);
                 break;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Dalamud's first look at every chat message, before other plugins' chat handlers: the jukebox link's tells are
+    /// handled and hidden here, so chat-bubble plugins and the like never see them (they showed a bubble with the
+    /// sender's previous message for them).
+    /// </summary>
+    private void OnCheckMessageHandled(IHandleableChatMessage message)
+    {
+        if (message.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing) HandleJukeboxTell(message);
+    }
+
+    // Terminals linked to you recently (said "hi" in the last 10 minutes): they get your info again when your song
+    // changes, so their "now playing" stays current without asking every few seconds.
+    private readonly Dictionary<string, (string Name, string? World, DateTime At)> jukeboxListeners = new(StringComparer.OrdinalIgnoreCase);
+    private string? lastJukeboxSong;
+    private DateTime lastJukeboxCheck = DateTime.MinValue;
+
+    private void OnJukeboxTick(Dalamud.Plugin.Services.IFramework _)
+    {
+        if ((DateTime.Now - lastJukeboxCheck).TotalSeconds < 2) return;
+        lastJukeboxCheck = DateTime.Now;
+        var song = Player.Current?.Title ?? Player.Syncing?.Title;
+        if (song == lastJukeboxSong) return;
+        lastJukeboxSong = song;
+        if (!Config.AllowJukebox) return;
+
+        foreach (var (who, l) in jukeboxListeners.ToList())
+        {
+            if ((DateTime.Now - l.At).TotalMinutes > 10) { jukeboxListeners.Remove(who); continue; }
+            Replier.SendRawTo(who, JukeboxProtocol.Info(InfoFor(l.Name, l.World)));
+        }
     }
 
     private JukeboxInfo InfoFor(string sender, string? world)
@@ -92,7 +125,7 @@ public sealed partial class Plugin
             MaxSongs: Config.MaxPlaylistSongs,
             Queued: Player.PendingCount,
             QueuedSeconds: queue.Sum(q => q.Request.KnownSeconds ?? 0),
-            NowPlaying: Player.Current?.Title);
+            NowPlaying: Player.Current?.Title ?? Player.Syncing?.Title);
     }
 
     /// <summary>"q PART/PARTS SHUFFLE IDS": collects the parts of a send, then queues it under the usual rules.</summary>

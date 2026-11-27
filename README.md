@@ -180,7 +180,12 @@ cooldown, max songs per send). If they don't, it says LINK FAILED: it only works
 - **Send to their queue** or **Shuffle & send**: their Tundy treats it like a playlist request from you, so their rules
   apply (who can request, approval, max songs per playlist, playlist cooldown). With approval, it waits on their Now
   playing tab as one "Jukebox: N songs" request.
-- **Save their queue** copies the songs in their queue into a new playlist of yours.
+- **Single songs**: paste a link or search, then press **Send** (or the play button on a search result or a playlist song)
+  to send just that song; no playlist needed.
+- **Their queue** tab: what's playing and the songs waiting on their side (names and lengths filled in), with a button to
+  copy a song into your playlist and **Save as a playlist**. Their "now playing" updates by itself when their song
+  changes.
+- The link's tells are hidden before other plugins see them, so chat-bubble plugins don't show anything for them.
 - The terminal uses your Tundy theme (pastel, minimal or Dalamud's own look).
 
 How it talks: there's no other channel between two players' plugins, so the two Tundys use tells. Each tell starts with

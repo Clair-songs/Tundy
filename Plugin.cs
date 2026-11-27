@@ -178,6 +178,9 @@ public sealed partial class Plugin : IDalamudPlugin
         });
 
         Chat.ChatMessage += OnChatMessage;
+        // The jukebox link's tells are caught here, before other plugins (chat bubbles and the like) see them.
+        Chat.CheckMessageHandled += OnCheckMessageHandled;
+        Framework.Update += OnJukeboxTick;
 
         foreach (var note in importNotes) Chat.Print($"[Tundy] {note}");
         if (TellTunesLoaded)
@@ -987,7 +990,8 @@ public sealed partial class Plugin : IDalamudPlugin
     private void OnChatMessage(IHandleableChatMessage message)
     {
         // The jukebox link's tells (both ways) are hidden and handled first.
-        if (message.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing && HandleJukeboxTell(message))
+        // (Normally already handled in OnCheckMessageHandled; this only hides one that got through, without answering twice.)
+        if (message.LogKind is XivChatType.TellIncoming or XivChatType.TellOutgoing && HandleJukeboxTell(message, process: false))
             return;
         if (message.LogKind != XivChatType.TellIncoming)
             return;
@@ -1360,6 +1364,8 @@ public sealed partial class Plugin : IDalamudPlugin
     public void Dispose()
     {
         ContextMenu.OnMenuOpened -= OnContextMenu;
+        Chat.CheckMessageHandled -= OnCheckMessageHandled;
+        Framework.Update -= OnJukeboxTick;
         Chat.ChatMessage -= OnChatMessage;
         CommandManager.RemoveHandler(MainCommand);
         PluginInterface.UiBuilder.Draw -= windows.Draw;
