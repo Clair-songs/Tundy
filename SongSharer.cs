@@ -514,7 +514,8 @@ public sealed class SongSharer : IDisposable
     /// <summary>Converts a downloaded song into a game sound file for the chosen emote or music mod slot.</summary>
     /// <param name="audioFile">The downloaded song (AAC, which Windows can read).</param>
     /// <param name="musicSource">A better source for Vorbis music (YouTube's Opus audio), or null to use <paramref name="audioFile"/>.</param>
-    public string BuildScd(string audioFile, CancellationToken ct, string? musicSource = null)
+    /// <param name="gainDb">Turn the song up or down by this much (evening out song volume).</param>
+    public string BuildScd(string audioFile, CancellationToken ct, string? musicSource = null, double gainDb = 0)
     {
         var emote = Emote;
         var template = emote.Routes != null
@@ -528,7 +529,7 @@ public sealed class SongSharer : IDisposable
             // A music mod whose song slot holds a short sound effect (MS-ADPCM), not streamed music: build the song
             // the same way, or the game plays it silently.
             Plugin.Log.Information($"{emote.ScdPath} holds a sound effect in this mod, so the song is built the same way (mono ADPCM)");
-            var audio = ScdBuilder.EncodeAdpcmMono(audioFile, config.ShareSmallerFiles ? 22050 : 44100, ct);
+            var audio = ScdBuilder.EncodeAdpcmMono(audioFile, config.ShareSmallerFiles ? 22050 : 44100, ct, (float)Math.Pow(10, gainDb / 20));
             scd = ScdBuilder.Build(template, audio);
         }
         else if (emote.Routes != null)
@@ -538,14 +539,15 @@ public sealed class SongSharer : IDisposable
             var ffmpeg = ffmpegTool.Get(ct);
             Status = "Converting song for sharing...";
             var source = musicSource != null && File.Exists(musicSource) ? musicSource : audioFile;
-            var ogg = VorbisScd.EncodeOgg(ffmpeg, source, config.ShareSmallerFiles ? 3 : 6, ct);
+            var ogg = VorbisScd.EncodeOgg(ffmpeg, source, config.ShareSmallerFiles ? 3 : 6, ct,
+                gainDb == 0 ? null : $"volume={gainDb.ToString(System.Globalization.CultureInfo.InvariantCulture)}dB");
             scd = VorbisScd.Build(template, ogg, loopSilentTail: true);
             try { PrepareSilence(emote.ScdPath, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException) { Plugin.Log.Warning(ex, "Couldn't make the silent track"); }
         }
         else
         {
-            var audio = ScdBuilder.EncodeAdpcmMono(audioFile, config.ShareSmallerFiles ? 22050 : 44100, ct);
+            var audio = ScdBuilder.EncodeAdpcmMono(audioFile, config.ShareSmallerFiles ? 22050 : 44100, ct, (float)Math.Pow(10, gainDb / 20));
             scd = ScdBuilder.Build(template, audio);
         }
 

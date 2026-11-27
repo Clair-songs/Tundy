@@ -41,7 +41,11 @@ public sealed record SongRequest(string Url, string Sender, string? SpotifyId = 
 }
 
 /// <param name="ScdPath">Game sound file for sharing through Lightless, or null if not shared.</param>
-public sealed record Track(string File, string Title, SongRequest Request, string? ScdPath = null);
+public sealed record Track(string File, string Title, SongRequest Request, string? ScdPath = null)
+{
+    /// <summary>How much this song is turned up or down to even out song volume (dB, 0 = as it is).</summary>
+    public double GainDb { get; init; }
+}
 
 public sealed record HistoryEntry(string Title, SongRequest Request, DateTime PlayedAt);
 
@@ -160,33 +164,41 @@ public sealed class MusicPlayer : IDisposable
     // At most two name lookups at once, so a big playlist doesn't start dozens of yt-dlp processes.
     private readonly SemaphoreSlim titleLookups = new(2);
 
+    /// <summary>
+    /// A song's name and length: from Spotify for a Spotify track, else from YouTube (at most two lookups at once).
+    /// Used for the queue and for requests waiting for approval. Throws if it can't be read.
+    /// </summary>
+    public async Task<(string? Title, int? Seconds)> LookUpAsync(string url, string? spotifyId, Func<bool>? stillNeeded = null)
+    {
+        await titleLookups.WaitAsync();
+        try
+        {
+            if (stillNeeded != null && !stillNeeded()) return (null, null);
+            if (spotifyId != null)
+            {
+                var t = await SpotifyResolver.GetTrackAsync(await SpotifyResolver.ResolveIdAsync(spotifyId, default), default);
+                return (t.Display, t.DurationSeconds);
+            }
+            var info = await ytDlp.GetInfoAsync(url, default);
+            return (info?.DisplayTitle, info?.Seconds);
+        }
+        finally { titleLookups.Release(); }
+    }
+
     /// <summary>Finds the song's name in the background so the queue shows it instead of the link.</summary>
     private void LookUpTitle(SongRequest req)
     {
         if ((req.Title != null && req.KnownSeconds != null) || req.Track != null) return;
         _ = Task.Run(async () =>
         {
-            await titleLookups.WaitAsync();
             try
             {
-                if (req.Title != null && req.KnownSeconds != null) return; // the download got there first
-                string? title;
-                int? seconds;
-                if (req.SpotifyId != null)
-                {
-                    var t = await SpotifyResolver.GetTrackAsync(await SpotifyResolver.ResolveIdAsync(req.SpotifyId, default), default);
-                    (title, seconds) = (t.Display, t.DurationSeconds);
-                }
-                else
-                {
-                    var info = await ytDlp.GetInfoAsync(req.Url, default);
-                    (title, seconds) = (info?.DisplayTitle, info?.Seconds);
-                }
+                // (Skipped if the download got there first.)
+                var (title, seconds) = await LookUpAsync(req.Url, req.SpotifyId, () => req.Title == null || req.KnownSeconds == null);
                 if (!string.IsNullOrWhiteSpace(title)) req.Title ??= title;
                 req.Seconds ??= seconds;
             }
             catch (Exception ex) { Plugin.Log.Debug(ex, $"Couldn't look up the name of {req.Url}"); }
-            finally { titleLookups.Release(); }
         });
     }
 
@@ -413,9 +425,11 @@ public sealed class MusicPlayer : IDisposable
                 volume.Volume = VolumeFor(Current);
     }
 
-    /// <summary>Tundy's own playback volume. While a song is shared, its in-game copy is what you hear instead.</summary>
+    /// <summary>Tundy's own playback volume. While a song is shared, its in-game copy is what you hear instead.
+    /// The song's own adjustment from evening out song volume is included (it was measured so it never clips).</summary>
     private float VolumeFor(Track? track) =>
-        config.Muted || (track?.ScdPath != null && config.ShareSilenceLocal) ? 0f : Math.Clamp(config.Volume, 0f, 1f);
+        config.Muted || (track?.ScdPath != null && config.ShareSilenceLocal) ? 0f
+        : Math.Clamp(config.Volume, 0f, 1f) * (track is { GainDb: not 0 } && config.EvenOutVolume ? (float)Math.Pow(10, track.GainDb / 20) : 1f);
 
     /// <summary>
     /// Older versions set WaveOutEvent.Volume, which in Windows changes the volume of the whole game process
@@ -557,6 +571,26 @@ public sealed class MusicPlayer : IDisposable
                 Plugin.Log.Debug(ex, $"Couldn't check {file} for edit lists");
             }
 
+            // Even out song volume: how loud is this one? Needs no ffmpeg, and runs while the shared copy's Opus audio
+            // downloads (decoding the song takes a second or two).
+            var gainTask = config.EvenOutVolume
+                ? Task.Run(() =>
+                {
+                    try
+                    {
+                        var g = Loudness.GainDbFor(file, ct);
+                        Plugin.Log.Information($"Evening out \"{title}\": {(g > 0 ? "+" : "")}{g:0.0} dB");
+                        return g;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        Plugin.Log.Debug(ex, $"Couldn't measure how loud \"{title}\" is; it plays as it is");
+                        return 0d;
+                    }
+                }, ct)
+                : Task.FromResult(0d);
+            double gainDb = 0;
+
             string? scd = null;
             if (sharer.CanShare)
             {
@@ -578,7 +612,8 @@ public sealed class MusicPlayer : IDisposable
 
                 try
                 {
-                    scd = await Task.Run(() => sharer.BuildScd(file, ct, opus), ct);
+                    gainDb = await gainTask;
+                    scd = await Task.Run(() => sharer.BuildScd(file, ct, opus, gainDb), ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -591,7 +626,9 @@ public sealed class MusicPlayer : IDisposable
                 }
             }
 
-            return new Track(file, title, req, scd);
+            // The in-game copy already has the adjustment built in; your own player applies it while playing.
+            gainDb = await gainTask;
+            return new Track(file, title, req, scd) { GainDb = gainDb };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -707,7 +744,9 @@ public sealed class MusicPlayer : IDisposable
             if (history.Count > MaxHistory) history.RemoveAt(0);
         }
 
-        notify($"Now playing: {track.Title} (from {track.Request.Sender})");
+        // With announcements on, your character already posts the song in chat: no second line for you.
+        if (config.AnnounceSongs) Plugin.Log.Information($"Now playing: {track.Title} (from {track.Request.Sender})");
+        else notify($"Now playing: {track.Title} (from {track.Request.Sender})");
         TrackStarted?.Invoke(track);
 
         if (track.ScdPath != null && config.ShareAutoEmote)

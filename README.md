@@ -186,6 +186,9 @@ Settings → **Announce songs in chat**: when a song starts, your character post
 - Message template with `{title}` and `{requester}`, a live preview, and a **Send a test message** button.
 - Song titles come from other people, so line breaks and `<` `>` are removed (the game would turn `<pos>`/`<t>`
   into your position or target), long titles are shortened, and there's at most one announcement every 20 seconds.
+- **Also show Tundy's own notes in my chat** (in the same group, on by default): short `[Tundy]` lines only you see,
+  like "Queued request from ...". While songs are announced, Tundy's own "Now playing" note is left out, so the song
+  doesn't show twice.
 
 ## Playlists
 Send a playlist like a song: `!q <playlist link>`.
@@ -204,6 +207,11 @@ Send a playlist like a song: `!q <playlist link>`.
 - yt-dlp updates itself once a day, and uses deno (Soundy's copy if you have Soundy, otherwise Tundy downloads the
   official release once) to get past YouTube's download checks.
 - Recent songs are kept (Settings, default 500 MB) so repeats and History replays start instantly.
+- **Even out song volume** (Settings → Playback, on by default): each song's loudness is measured the way YouTube and
+  Spotify do it (integrated loudness, BS.1770), and the song is turned down or up to -14 LUFS. Most music is mastered
+  louder, so most songs get a little quieter. Quiet songs are only turned up as far as their peaks allow, so nothing
+  distorts. It applies to your player and to the in-game copy your pairs hear, and needs no ffmpeg. Measuring runs
+  while the song is prepared, taking about a second or two per song.
 - Failed downloads are retried automatically for temporary problems (network, HTTP 403, bot checks, timeouts), with
   a yt-dlp update before the last try. Songs that can never play (private, age-restricted, too long, live...) aren't.
 - When YouTube refuses a download with HTTP 403 or 503 (it often does over IPv6), Tundy tries again right away over
@@ -277,6 +285,6 @@ Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] 
 ## Safety defaults (change them in the window)
 - Only YouTube and Spotify links are accepted, so senders can't make yt-dlp fetch other sites.
 - Max song length 10 min, no live streams, queue of up to 20, 30 s cooldown per sender, and 10 min between
-  playlists from the same person (Settings → Requests → Playlist cooldown).
+  playlists from the same person (Settings → Playlists → Playlist cooldown).
 - Only plain emote commands (`/word`) can be set as the music mod's emote.
 - If downloads start failing, click **Update yt-dlp** (YouTube changes often).

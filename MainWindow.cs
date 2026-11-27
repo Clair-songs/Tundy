@@ -1685,13 +1685,7 @@ public sealed partial class MainWindow : Window
         ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
         var cd = cfg.PerSenderCooldownSeconds;
         if (ImGui.SliderInt("Cooldown per person (seconds)", ref cd, 0, 600)) { cfg.PerSenderCooldownSeconds = cd; changed = true; }
-        Ui.Help("How long one person has to wait between requests.");
-
-        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
-        var plCd = cfg.PlaylistCooldownSeconds / 60;
-        if (ImGui.SliderInt("Playlist cooldown per person (minutes)", ref plCd, 0, 120)) { cfg.PlaylistCooldownSeconds = plCd * 60; changed = true; }
-        Ui.Help("How long one person has to wait between playlist requests (also with shuffle commands), on top of the cooldown above. "
-                + "With replies on, they're told how long is left. Playlists you add yourself or approve don't count.");
+        Ui.Help("How long one person has to wait between requests. Playlists have their own wait too, under Playlists.");
 
         }
 
@@ -1793,6 +1787,12 @@ public sealed partial class MainWindow : Window
         ImGui.TextDisabled(plugin.Announcer.LastResult);
         if (!announce) ImGui.EndDisabled();
 
+        ImGui.Spacing();
+        var echo = cfg.EchoToChat;
+        if (ImGui.Checkbox("Also show Tundy's own notes in my chat (only I see them)", ref echo)) { cfg.EchoToChat = echo; changed = true; }
+        Ui.Help("Short [Tundy] lines like \"Queued request from ...\" and \"Now playing: ...\". While songs are announced "
+                + "above, the \"Now playing\" note is left out, since the announcement already shows it.");
+
         }
 
         if (Ui.Group("Skipping with !skip and !skipall"))
@@ -1861,14 +1861,24 @@ public sealed partial class MainWindow : Window
         var maxPl = cfg.MaxPlaylistSongs;
         if (ImGui.SliderInt("Max songs per playlist", ref maxPl, 1, 50)) { cfg.MaxPlaylistSongs = maxPl; changed = true; }
         Ui.Help("So one tell can't fill the whole queue.");
+        ImGui.SetNextItemWidth(220 * ImGuiHelpers.GlobalScale);
+        var plCd = cfg.PlaylistCooldownSeconds / 60;
+        if (ImGui.SliderInt("Playlist cooldown per person (minutes)", ref plCd, 0, 120)) { cfg.PlaylistCooldownSeconds = plCd * 60; changed = true; }
+        Ui.Help("How long one person has to wait between playlist requests (also with shuffle commands), on top of the "
+                + "cooldown per person under Requests. With replies on, they're told how long is left. Playlists you add "
+                + "yourself or approve don't count.");
         if (!allowPl) ImGui.EndDisabled();
 
         }
 
         if (Ui.Group("Playback"))
         {
-        var echo = cfg.EchoToChat;
-        if (ImGui.Checkbox("Show \"Now playing / Queued\" messages in chat", ref echo)) { cfg.EchoToChat = echo; changed = true; }
+        var even = cfg.EvenOutVolume;
+        if (ImGui.Checkbox("Even out song volume", ref even)) { cfg.EvenOutVolume = even; plugin.Player.ApplyVolume(); changed = true; }
+        Ui.Help("Measures how loud each song is (the way YouTube and Spotify do) and turns loud songs down and quiet ones up, "
+                + "so they all play at about the same volume: in your player and in the in-game copy your pairs hear. "
+                + "Quiet songs are only turned up as far as they can go without distorting. For the in-game copy it "
+                + "applies from the next song.");
 
         var keepSongs = cfg.CacheSongs;
         if (ImGui.Checkbox("Keep recent songs so repeats start instantly", ref keepSongs)) { cfg.CacheSongs = keepSongs; changed = true; }

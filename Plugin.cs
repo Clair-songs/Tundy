@@ -134,7 +134,6 @@ public sealed partial class Plugin : IDalamudPlugin
         YtDlp = new YtDlp(Path.Combine(dir, "bin"), () => Config.YtDlpPath);
         Announcer = new Announcer(Config, Framework, ObjectTable);
         Replier = new QueueReplier(Config, Framework);
-        Framework.RunOnFrameworkThread(RestoreVolumeAfterPause); // game closed while paused last time (old TellTunes)
         Music = new MegaMusicMod(PluginInterface, ObjectTable, Config);
         Ffmpeg = new FfmpegTool(Path.Combine(dir, "bin"));
         Importer = new ModImporter(PluginInterface, Framework, DataManager, YtDlp, Ffmpeg, Config);
@@ -309,21 +308,6 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void SaveConfig() => PluginInterface.SavePluginConfig(Config);
 
-    /// <summary>
-    /// Old TellTunes versions muted the game's "Self" volume to pause. If the game closed while paused, put that
-    /// volume back once.
-    /// </summary>
-    private void RestoreVolumeAfterPause()
-    {
-        if (!Config.PausedMutedSelf) return;
-        try
-        {
-            GameConfig.Set(SystemConfigOption.SoundPlayer, Config.SavedSelfVolume is > 0 and <= 100 ? Config.SavedSelfVolume : 100u);
-            Config.PausedMutedSelf = false;
-            SaveConfig();
-        }
-        catch (Exception ex) { Log.Warning(ex, "Could not restore the song volume"); }
-    }
 
     // ------------------------------------------------------------------ request log
 
@@ -843,8 +827,9 @@ public sealed partial class Plugin : IDalamudPlugin
     /// </summary>
     /// <param name="force">Ignore the queue length limit (your own adds and requests you approved).</param>
     /// <param name="shuffle">Sent with a shuffle command: a playlist is shuffled (a single song just plays).</param>
+    /// <param name="title">The song's name and length if already known (looked up while it waited for approval).</param>
     private void Accept(byte[] encodedSender, string sender, string url, PlaylistLink? playlist, string? spotifyId, bool force, bool approved,
-                        bool shuffle = false)
+                        bool shuffle = false, string? title = null, int? seconds = null)
     {
         var replyStart = approved ? "Your request was approved. " : "";
         if (playlist != null)
@@ -858,7 +843,13 @@ public sealed partial class Plugin : IDalamudPlugin
             return;
         }
 
-        if (Player.TryEnqueue(new SongRequest(url, sender, spotifyId) { EncodedSender = sender == "You" ? null : encodedSender }, force))
+        var request = new SongRequest(url, sender, spotifyId)
+        {
+            EncodedSender = sender == "You" ? null : encodedSender,
+            Title = string.IsNullOrWhiteSpace(title) ? null : title,
+            Seconds = seconds,
+        };
+        if (Player.TryEnqueue(request, force))
         {
             AddLog(sender, url, sender == "You" ? "Queued (manual)" : approved ? "Approved and queued" : "Queued", true);
             Replier.Send(encodedSender, sender, replyStart + QueueReplier.Message(null, SongsBefore(alreadyQueued: true)));
@@ -1102,17 +1093,12 @@ public sealed partial class Plugin : IDalamudPlugin
             {
                 if (playlist != null)
                     item.Title = shuffle ? "Playlist (shuffled)" : "Playlist";
-                else if (spotifyId != null && !spotifyId.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                else if (spotifyId == null || !spotifyId.StartsWith("http", StringComparison.OrdinalIgnoreCase)) // not a short link
                 {
-                    var t = await SpotifyResolver.GetTrackAsync(spotifyId, default);
-                    item.Seconds = t.DurationSeconds;
-                    item.Title = t.Display;
-                }
-                else if (spotifyId == null)
-                {
-                    var info = await YtDlp.GetInfoAsync(url, default);
-                    item.Seconds = info?.Seconds;
-                    item.Title = info?.DisplayTitle;
+                    // The same lookup the queue uses; what's found goes along when you approve it.
+                    var (title, seconds) = await Player.LookUpAsync(url, spotifyId);
+                    item.Seconds = seconds;
+                    item.Title = title;
                 }
             }
             catch (Exception ex) { Log.Debug(ex, $"Couldn't look up {url}"); }
@@ -1133,7 +1119,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void AcceptApproved(PendingRequest r)
     {
-        Accept(r.EncodedSender, r.Sender, r.Url, r.Playlist, r.SpotifyId, force: true, approved: true, r.Shuffle);
+        Accept(r.EncodedSender, r.Sender, r.Url, r.Playlist, r.SpotifyId, force: true, approved: true, r.Shuffle, r.Title, r.Seconds);
     }
 
     public void Reject(Guid id)

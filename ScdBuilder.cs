@@ -24,7 +24,8 @@ public static class ScdBuilder
     public sealed record Adpcm(byte[] FormatChunk, byte[] Data, int Channels, int SampleRate);
 
     /// <summary>Converts any audio file Media Foundation can read into mono MS-ADPCM.</summary>
-    public static Adpcm EncodeAdpcmMono(string audioFile, int sampleRate, CancellationToken ct)
+    /// <param name="gain">Volume factor applied to the samples (1 = as it is), for evening out song volume.</param>
+    public static Adpcm EncodeAdpcmMono(string audioFile, int sampleRate, CancellationToken ct, float gain = 1f)
     {
         // 1. Decode, mix to mono (game sound effects are mono so they can be placed around your
         //    character), and resample to the target rate as 16-bit PCM.
@@ -46,7 +47,7 @@ public static class ScdBuilder
             {
                 ct.ThrowIfCancellationRequested();
                 for (var i = 0; i < n; i++)
-                    samples.Add((short)Math.Clamp((int)MathF.Round(buf[i] * 32767f), short.MinValue, short.MaxValue));
+                    samples.Add((short)Math.Clamp((int)MathF.Round(buf[i] * gain * 32767f), short.MinValue, short.MaxValue));
             }
             pcm = samples.ToArray();
         }

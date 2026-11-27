@@ -3,7 +3,7 @@
         "Author":  "Tundy",
         "Name":  "Tundy",
         "InternalName":  "Tundy",
-        "AssemblyVersion":  "0.6.4.0",
+        "AssemblyVersion":  "0.6.5.0",
         "Description":  "When someone sends you a tell with \"!q \u003clink\u003e\", Tundy queues the song automatically. Works with YouTube videos and playlists, and Spotify tracks, playlists and albums (matched to YouTube). Has its own song queue like SoundyQ (approval queue, who can request, per-player permissions) and plays songs for nearby Lightless Sync pairs through the Mega Music Mod. Includes Soundy\u0027s import tools: add YouTube or local songs to any Penumbra mod with loudness and EQ presets, and replace game sounds. Optional: announce songs in chat and tell requesters their place in the queue. Downloads use yt-dlp, which Tundy fetches on first use. Free software under the GNU AGPL-3.0.",
         "Punchline":  "Play songs people send you by /tell: YouTube, Spotify and playlists.",
         "ApplicableVersion":  "any",
@@ -25,10 +25,11 @@
         "IsHide":  false,
         "IsTestingExclusive":  false,
         "DownloadCount":  0,
-        "LastUpdate":  1795807397,
+        "LastUpdate":  1795809340,
         "DownloadLinkInstall":  "https://raw.githubusercontent.com/Clair-songs/Tundy/main/plugins/Tundy/latest.zip",
         "DownloadLinkUpdate":  "https://raw.githubusercontent.com/Clair-songs/Tundy/main/plugins/Tundy/latest.zip",
         "DownloadLinkTesting":  "https://raw.githubusercontent.com/Clair-songs/Tundy/main/plugins/Tundy/latest.zip",
-        "IconUrl":  "https://raw.githubusercontent.com/Clair-songs/Tundy/main/images/icon.png"
+        "IconUrl":  "https://raw.githubusercontent.com/Clair-songs/Tundy/main/images/icon.png",
+        "Changelog":  "- Songs now play at about the same volume: Tundy measures how loud each one is and turns loud songs down and quiet ones up, for you and for the in-game copy your pairs hear (Settings → Playback → Even out song volume, on by default).\n- No more two \"Now playing\" lines in your chat while songs are announced.\n- Approved songs keep the name and length found while they waited, so they aren\u0027t looked up again.\n- The playlist cooldown moved to Settings → Playlists, next to the other playlist settings.\n- Removed a few old settings that did nothing."
     }
 ]

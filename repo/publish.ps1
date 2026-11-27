@@ -6,6 +6,7 @@
 .DESCRIPTION
   Uses GitHub CLI's own sign-in (gh auth login). Creates the repository the first time.
   Raise <Version> in Tundy.csproj before publishing an update, or Dalamud won't offer it.
+  Add a "## <version>" section to CHANGELOG.md too: Dalamud shows it as the update's notes in its plugin list.
 
 .EXAMPLE
   .\repo\publish.ps1
@@ -15,7 +16,9 @@ param(
     [string]$Owner = "Clair-songs",
     [string]$Repo = "Tundy",
     [string]$Branch = "main",
-    [string]$Message = ""
+    [string]$Message = "",
+    # The update notes; by default this version's section of CHANGELOG.md.
+    [string]$Changelog = ""
 )
 # gh writes expected "Not Found" answers to stderr; exit codes are checked instead.
 $ErrorActionPreference = "Continue"
@@ -66,6 +69,19 @@ $entry = [ordered]@{
     DownloadLinkInstall = $zipUrl; DownloadLinkUpdate = $zipUrl; DownloadLinkTesting = $zipUrl
     IconUrl = $manifest.IconUrl
 }
+
+# Update notes: this version's "## x.y.z" section of CHANGELOG.md (Dalamud shows them in its plugin list).
+if ($Changelog -eq "") {
+    $short = ($manifest.AssemblyVersion -split '\.')[0..2] -join '.'
+    $changelogFile = Join-Path $project "CHANGELOG.md"
+    if (Test-Path $changelogFile) {
+        $section = [regex]::Match((Get-Content $changelogFile -Raw -Encoding UTF8), "(?ms)^## $([regex]::Escape($short))\b[^\r\n]*\r?\n(.*?)(?=^## |\z)")
+        # Lines wrapped in the file (indented) become one line each in Dalamud.
+        if ($section.Success) { $Changelog = ($section.Groups[1].Value.Trim() -replace '\r?\n\s+', ' ') -replace '\r\n', "`n" }
+    }
+    if ($Changelog -eq "") { Write-Warning "No update notes: CHANGELOG.md has no '## $short' section." }
+}
+if ($Changelog -ne "") { $entry["Changelog"] = $Changelog }
 $pluginmaster = Join-Path $tmp "pluginmaster.json"
 [IO.File]::WriteAllText($pluginmaster, (ConvertTo-Json -InputObject @($entry) -Depth 5), (New-Object Text.UTF8Encoding $false))
 

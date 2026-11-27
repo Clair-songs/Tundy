@@ -94,10 +94,8 @@ internal static class SettingsImporter
                 .ToList();
 
             // Importer
-            if (Has("PenumbraPath", JsonValueKind.String, out var path)) config.PenumbraPath = path.GetString() ?? "";
             if (Has("Volume", JsonValueKind.Number, out var vol)) config.ImportVolume = (float)vol.GetDouble();
             if (Has("EqPreset", JsonValueKind.Number, out var eq)) config.ImportEqPreset = eq.GetInt32();
-            if (Has("BusChoice", JsonValueKind.Number, out var bus)) config.ImportBusChoice = bus.GetInt32();
             if (Has("PreferredImportSource", JsonValueKind.Number, out var src)) config.ImportSource = src.GetInt32();
 
             // SoundyQ

@@ -18,9 +18,6 @@ public class Configuration : IPluginConfiguration
     /// <summary>The game's "Self" volume from before you muted an in-game song, to put back on unmute.</summary>
     public uint SavedSelfVolume { get; set; } = 100;
 
-    /// <summary>True while Tundy has muted "Self" for a pause, so it can be put back even after a crash.</summary>
-    public bool PausedMutedSelf { get; set; } = false;
-
     /// <summary>Show the small "Now playing" window with the song name and time.</summary>
     public bool ShowMiniPlayer { get; set; } = false;
 
@@ -139,6 +136,9 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Keep recently downloaded songs so repeats and History replays start instantly.</summary>
     public bool CacheSongs { get; set; } = true;
+
+    /// <summary>Bring every song to about the same loudness (for you and for the in-game copy your pairs hear).</summary>
+    public bool EvenOutVolume { get; set; } = true;
 
     /// <summary>Most disk space the saved songs may use, in MB.</summary>
     public int CacheSizeMb { get; set; } = 500;
@@ -276,8 +276,6 @@ public class Configuration : IPluginConfiguration
 
     // ---- Importer (Soundy's mod import tools; used from a later update on) ----
 
-    /// <summary>Penumbra's mod folder, e.g. "C:\Penumbra".</summary>
-    public string PenumbraPath { get; set; } = string.Empty;
 
     /// <summary>Loudness for imported songs: 1.0 = original, higher boosts with a limiter.</summary>
     public float ImportVolume { get; set; } = 1.0f;
@@ -285,8 +283,6 @@ public class Configuration : IPluginConfiguration
     /// <summary>EQ preset for imported songs (Soundy's numbering).</summary>
     public int ImportEqPreset { get; set; } = 0;
 
-    /// <summary>Sound bus choice for imported songs (Soundy's numbering).</summary>
-    public int ImportBusChoice { get; set; } = 0;
 
     /// <summary>Import from YouTube (0) or a local file (1) by default.</summary>
     public int ImportSource { get; set; } = 0;
