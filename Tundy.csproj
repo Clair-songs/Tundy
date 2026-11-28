@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.6.5.0</Version>
+    <Version>0.6.6.0</Version>
     <Description>Plays songs people send you via /tell with "!q [link]": YouTube, Spotify and playlists.</Description>
     <PackageProjectUrl>https://github.com/Clair-songs/Tundy</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>

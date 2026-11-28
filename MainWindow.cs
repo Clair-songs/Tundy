@@ -398,10 +398,6 @@ public sealed partial class MainWindow : Window
         var width = ImGui.GetContentRegionAvail().X - 10 * scale;
         controls.DrawSeekBar(width);
         controls.DrawButtons();
-        ImGui.SameLine();
-        ImGui.Dummy(new Vector2(12, 0));
-        ImGui.SameLine();
-        controls.DrawVolume(Math.Min(220 * scale, ImGui.GetContentRegionAvail().X - ImGui.GetFrameHeight() * 2 - 10 * scale));
         ImGui.EndGroup();
         Ui.EndCard();
 

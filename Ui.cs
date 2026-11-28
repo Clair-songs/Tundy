@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.Config;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
@@ -359,77 +358,5 @@ public sealed class PlayerControls
         ImGui.SameLine();
         if (Ui.IconButton("stop", FontAwesomeIcon.Stop, "Stop and clear the whole queue", !active && player.PendingCount == 0))
             player.Stop();
-    }
-
-    /// <summary>
-    /// True when the song plays inside the game (through the music mod or an emote) instead of
-    /// Tundy's own player. Then the volume bar controls the game's "Self" sound volume, because the song is a
-    /// sound your character makes.
-    /// </summary>
-    private bool SongPlaysInGame => plugin.SongPlaysInGame;
-
-    public void DrawVolume(float sliderWidth)
-    {
-        if (SongPlaysInGame)
-        {
-            DrawGameVolume(sliderWidth);
-            return;
-        }
-
-        var cfg = plugin.Config;
-        if (Ui.IconButton("mute", cfg.Muted ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp, cfg.Muted ? "Unmute" : "Mute"))
-        {
-            cfg.Muted = !cfg.Muted;
-            plugin.Player.ApplyVolume();
-            plugin.SaveConfig();
-        }
-        ImGui.SameLine();
-        var vol = (int)MathF.Round(cfg.Volume * 100);
-        ImGui.SetNextItemWidth(sliderWidth);
-        if (ImGui.SliderInt("##vol", ref vol, 0, 100, cfg.Muted ? "Muted" : "Volume %d%%"))
-        {
-            cfg.Volume = vol / 100f;
-            if (cfg.Muted) cfg.Muted = false;
-            plugin.Player.ApplyVolume();
-        }
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            plugin.SaveConfig();
-    }
-
-    /// <summary>Volume bar for in-game songs: the game's System Configuration → Sound Settings → "Self" volume.</summary>
-    private void DrawGameVolume(float sliderWidth)
-    {
-        var cfg = plugin.Config;
-        if (!Plugin.GameConfig.TryGet(SystemConfigOption.SoundPlayer, out uint current))
-        {
-            ImGui.TextDisabled("Game volume unavailable");
-            return;
-        }
-
-        const string why = "The song plays from your character in the game, so this is the game's \"Self\" sound volume "
-                           + "(System Configuration → Sound Settings). It changes how loud the song is for you; "
-                           + "other players hear it at their own settings.";
-
-        var muted = current == 0;
-        if (Ui.IconButton("gmute", muted ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp, muted ? "Unmute the song" : "Mute the song"))
-        {
-            if (muted)
-            {
-                Plugin.GameConfig.Set(SystemConfigOption.SoundPlayer, cfg.SavedSelfVolume is > 0 and <= 100 ? cfg.SavedSelfVolume : 100u);
-            }
-            else
-            {
-                cfg.SavedSelfVolume = current;
-                Plugin.GameConfig.Set(SystemConfigOption.SoundPlayer, 0u);
-                plugin.SaveConfig();
-            }
-        }
-        ImGui.SameLine();
-
-        var vol = (int)Math.Min(current, 100u);
-        ImGui.SetNextItemWidth(sliderWidth);
-        if (ImGui.SliderInt("##gvol", ref vol, 0, 100, vol == 0 ? "Song muted" : "Song %d%%"))
-            Plugin.GameConfig.Set(SystemConfigOption.SoundPlayer, (uint)vol);
-        Ui.Tooltip(why);
     }
 }

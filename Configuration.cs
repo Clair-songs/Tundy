@@ -15,9 +15,6 @@ public class Configuration : IPluginConfiguration
     /// <summary>Playback volume, 0.0 - 1.0.</summary>
     public float Volume { get; set; } = 0.5f;
 
-    /// <summary>The game's "Self" volume from before you muted an in-game song, to put back on unmute.</summary>
-    public uint SavedSelfVolume { get; set; } = 100;
-
     /// <summary>Show the small "Now playing" window with the song name and time.</summary>
     public bool ShowMiniPlayer { get; set; } = false;
 

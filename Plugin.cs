@@ -6,7 +6,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Command;
-using Dalamud.Game.Config;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
@@ -45,7 +44,6 @@ public sealed partial class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
-    [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
 
     /// <summary>Song covers for the player (YouTube thumbnails).</summary>
@@ -1164,12 +1162,6 @@ public sealed partial class Plugin : IDalamudPlugin
         return new NowPlayingInfo(null, null, null, null, Player.WaitingForSync ? "Syncing" : "Tundy");
     }
 
-    /// <summary>
-    /// True when the song plays inside the game (shared through the music mod or an emote) rather than in
-    /// Tundy's own player. Volume then means the game's "Self" sound volume.
-    /// </summary>
-    public bool SongPlaysInGame => Player.WaitingForSync || (Player.CurrentIsShared && Config.ShareSilenceLocal);
-
     // ------------------------------------------------------------------ UI / commands
 
     public void SetMiniPlayer(bool show)
@@ -1254,32 +1246,17 @@ public sealed partial class Plugin : IDalamudPlugin
                     ? "[Tundy] Sharing songs with nearby Lightless pairs."
                     : "[Tundy] Songs play just for you.");
                 break;
-            case "mute" when SongPlaysInGame:
-                if (GameConfig.TryGet(SystemConfigOption.SoundPlayer, out uint self) && self > 0)
-                {
-                    Config.SavedSelfVolume = self; SaveConfig();
-                    GameConfig.Set(SystemConfigOption.SoundPlayer, 0u);
-                }
-                else
-                {
-                    GameConfig.Set(SystemConfigOption.SoundPlayer, Config.SavedSelfVolume is > 0 and <= 100 ? Config.SavedSelfVolume : 100u);
-                }
-                break;
+            // Tundy's own player only: Tundy never changes the game's sound settings. (A song played from your
+            // character follows the game's "Self" volume, like your character's other sounds.)
             case "mute":
                 Config.Muted = !Config.Muted; SaveConfig();
                 Player.ApplyVolume();
+                Chat.Print(Config.Muted ? "[Tundy] Tundy's player is muted." : "[Tundy] Tundy's player is unmuted.");
                 break;
             case "vol" when parts.Length > 1 && int.TryParse(parts[1], out var v):
-                if (SongPlaysInGame)
-                {
-                    GameConfig.Set(SystemConfigOption.SoundPlayer, (uint)Math.Clamp(v, 0, 100));
-                    Chat.Print($"[Tundy] Song volume (game \"Self\" volume): {Math.Clamp(v, 0, 100)}%");
-                }
-                else
-                {
-                    Config.Volume = Math.Clamp(v, 0, 100) / 100f; SaveConfig();
-                    Player.ApplyVolume();
-                }
+                Config.Volume = Math.Clamp(v, 0, 100) / 100f; SaveConfig();
+                Player.ApplyVolume();
+                Chat.Print($"[Tundy] Tundy's player volume: {Math.Clamp(v, 0, 100)}%");
                 break;
             default:
                 Chat.Print("[Tundy] Usage: /tundy [mini|play <link>|skip|stop|approve [all]|import|on|off|share|mute|vol <0-100>]");

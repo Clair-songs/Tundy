@@ -258,7 +258,7 @@ on small status dots), or **Dalamud's own look**. The mini player and the welcom
   different request commands), Penumbra not running, the music mod not set up, ffmpeg missing, the emote not learned,
   or the last song didn't play for others.
 - **Top**: pills for accepting/paused requests, who can request, how songs are shared, and requests to approve. Click one to open its settings.
-- **Now playing**: the song's cover (its YouTube thumbnail, can be turned off in Settings → Look) and name, who sent it, a seek bar, skip/stop and volume; requests waiting for your approval, with song lengths; the next 3 songs with their lengths and how much music is queued; and a box to paste a link yourself.
+- **Now playing**: the song's cover (its YouTube thumbnail, can be turned off in Settings → Look) and name, who sent it, a seek bar, skip and stop; requests waiting for your approval, with song lengths; the next 3 songs with their lengths and how much music is queued; and a box to paste a link yourself.
 - **Queue**: play now, move up/down, remove, shuffle, clear (hold Ctrl), plus **History** (play again, re-queue, copy the link) and the **Requests log** (every request tell and what happened to it) as sections you can open.
 - **People**: request and shuffle commands, who can request, and per-player settings.
 - **Sharing**: setup in steps (Penumbra and Lightless, sharing on, the music mod or emote, then **Test now**, which does
@@ -271,7 +271,7 @@ on small status dots), or **Dalamud's own look**. The mini player and the welcom
 progress bar with elapsed / total time, skip and panel buttons, and who sent it. **Compact** (Settings → Now playing
 window, or right-click the window): cover, name, a thin time bar, skip and the next song, without a title bar.
 
-Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100`
+Chat commands: `/tundy mini | play <link> | skip | stop | retry | approve [all] | import | on | off | share | mute | vol 0-100` (`mute` and `vol` change only Tundy's own player, never the game's sound settings)
 
 ## Sharing Tundy with other people
 `dotnet build -c Release` makes `bin\Release\Tundy\latest.zip` (the plugin and everything it needs) and
